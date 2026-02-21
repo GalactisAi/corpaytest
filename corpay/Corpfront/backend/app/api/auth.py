@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 from datetime import datetime
 import bcrypt
@@ -9,6 +9,13 @@ from app.utils.auth import create_access_token, get_current_user
 from app.config import settings
 
 router = APIRouter(prefix="/api/admin/auth", tags=["auth"])
+
+
+@router.options("/login")
+def login_options():
+    """CORS preflight for POST /login."""
+    return Response(status_code=200)
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against its hash"""
