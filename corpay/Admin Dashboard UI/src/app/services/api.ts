@@ -2,7 +2,8 @@ import axios from 'axios';
 
 /**
  * Base URL with /api exactly once: ${VITE_API_URL}/api (or '/api' when no env).
- * Use for all API calls so the final URL is .../api/admin/... (not .../admin/... or .../api/api/...).
+ * All API request paths must be relative to this (e.g. 'admin/auth/login', 'dashboard/revenue').
+ * Do NOT use paths starting with /api (would double to .../api/api/...).
  */
 export function getBaseURL(): string {
   const base = import.meta.env.VITE_API_URL;
@@ -24,11 +25,11 @@ export const api = axios.create({
   timeout: 60000, // 60s — slow database wake-ups don't crash initial login
 });
 
-/** Origin only (no /api) for routes like /health that are mounted at root. */
+/** Origin only (no /api) for routes like /health mounted at root. Uses VITE_API_URL when set. */
 export function getOrigin(): string {
   const base = import.meta.env.VITE_API_URL;
   if (base != null && String(base).trim() !== '') return String(base).replace(/\/+$/, '');
-  return '';
+  return typeof window !== 'undefined' ? window.location.origin : '';
 }
 
 // Request path should NOT start with / so we get baseURL + '/' + path (e.g. /api/admin/auth/login)

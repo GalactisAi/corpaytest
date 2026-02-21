@@ -9,6 +9,7 @@ import { FileUpload } from '../FileUpload';
 import { toast } from 'sonner';
 import { Plus, Edit, Trash2, Upload, ImageIcon, ChevronDown } from 'lucide-react';
 import axios from 'axios';
+import { api } from '@/app/services/api';
 
 interface Employee {
   id: string;
@@ -95,23 +96,13 @@ export function EmployeesPage() {
   }, []);
 
   const fetchEmployees = async () => {
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     try {
-      // Try dev endpoint first
-      let response;
-      try {
-        response = await axios.get(`${API_BASE_URL}/api/admin/employees/dev`, { timeout: 120000 });
-      } catch (devError: any) {
-        const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-        };
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
-        response = await axios.get(`${API_BASE_URL}/api/admin/employees`, { headers, timeout: 120000 });
+      const token = localStorage.getItem('authToken') || localStorage.getItem('token');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
-      
+      const response = await api.get('admin/employees', { headers, timeout: 120000 });
       const employeesData = response.data || [];
       // Transform backend format to UI format
       const transformedEmployees = employeesData.map((emp: any) => ({
@@ -138,10 +129,7 @@ export function EmployeesPage() {
       return;
     }
 
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-
-    // Map UI milestone types to backend types
     const milestoneTypeMap: Record<string, string> = {
       'Work Anniversary': 'anniversary',
       'Promotion': 'promotion',
@@ -152,35 +140,19 @@ export function EmployeesPage() {
 
     let avatarPath = formData.photoUrl || null;
 
-    // Upload photo file if provided (upload first to get the path)
-    if (photoFile) {
+    if (photoFile && token) {
       try {
         const formDataUpload = new FormData();
         formDataUpload.append('file', photoFile);
-        
-        // Upload photo to get the path
-        let uploadResponse;
-        try {
-          // Append employee_id as form field
-          formDataUpload.append('employee_id', '0');
-          
-          uploadResponse = await axios.post(
-            `${API_BASE_URL}/api/admin/employees/upload-photo-dev`,
-            formDataUpload,
-            { 
-              timeout: 120000
-            }
-          );
-          avatarPath = uploadResponse.data.avatar_path;
-          console.log('Photo uploaded, path:', avatarPath);
-        } catch (uploadError: any) {
-          console.error('Photo upload error:', uploadError);
-          toast.error('Failed to upload photo. Continuing without photo.');
-          // Continue without photo if upload fails
-        }
-      } catch (error: any) {
-        console.error('Error uploading photo:', error);
-        // Continue without photo
+        formDataUpload.append('employee_id', '0');
+        const uploadResponse = await api.post('admin/employees/upload-photo', formDataUpload, {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 120000,
+        });
+        avatarPath = uploadResponse.data?.avatar_path ?? avatarPath;
+      } catch (uploadError: any) {
+        console.error('Photo upload error:', uploadError);
+        toast.error('Failed to upload photo. Continuing without photo.');
       }
     }
 
@@ -195,9 +167,7 @@ export function EmployeesPage() {
       milestone_date: new Date(formData.date).toISOString()
     };
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
@@ -205,147 +175,55 @@ export function EmployeesPage() {
     try {
       let response;
       if (editingEmployee) {
-        // Update existing milestone
         const milestoneId = editingEmployee.id;
-        const updatePayload = { headers: { 'Content-Type': 'application/json' }, timeout: 120000 };
-        const updatePayloadAuth = { headers, timeout: 120000 };
         try {
-          try {
-            response = await axios.put(
-              `${API_BASE_URL}/api/admin/employees/dev/${milestoneId}`,
-              milestoneData,
-              updatePayload
-            );
-          } catch (putError: any) {
-            if (putError.response?.status === 405) {
-              response = await axios.patch(
-                `${API_BASE_URL}/api/admin/employees/dev/${milestoneId}`,
-                milestoneData,
-                updatePayload
-              );
-            } else {
-              throw putError;
-            }
-          }
-        } catch (devError: any) {
-          try {
-            response = await axios.put(
-              `${API_BASE_URL}/api/admin/employees/${milestoneId}`,
-              milestoneData,
-              updatePayloadAuth
-            );
-          } catch (putError: any) {
-            if (putError.response?.status === 405) {
-              response = await axios.patch(
-                `${API_BASE_URL}/api/admin/employees/${milestoneId}`,
-                milestoneData,
-                updatePayloadAuth
-              );
-            } else {
-              throw putError;
-            }
+          response = await api.put(`admin/employees/${milestoneId}`, milestoneData, { headers, timeout: 120000 });
+        } catch (putError: any) {
+          if (putError.response?.status === 405) {
+            response = await api.patch(`admin/employees/${milestoneId}`, milestoneData, { headers, timeout: 120000 });
+          } else {
+            throw putError;
           }
         }
-        // If user selected a new photo, upload and link to this milestone
-        if (photoFile && avatarPath) {
-          const formDataUpload = new FormData();
-          formDataUpload.append('file', photoFile);
-          formDataUpload.append('employee_id', milestoneId);
-          try {
-            await axios.post(
-              `${API_BASE_URL}/api/admin/employees/upload-photo-dev`,
-              formDataUpload,
-              { timeout: 120000 }
-            );
-          } catch (uploadError: any) {
-            console.error('Photo upload on update failed:', uploadError);
-          }
-        } else if (photoFile && response?.data?.id) {
+        if (photoFile && response?.data?.id) {
           const formDataUpload = new FormData();
           formDataUpload.append('file', photoFile);
           formDataUpload.append('employee_id', response.data.id.toString());
           try {
-            await axios.post(
-              `${API_BASE_URL}/api/admin/employees/upload-photo-dev`,
-              formDataUpload,
-              { timeout: 120000 }
-            );
+            await api.post('admin/employees/upload-photo', formDataUpload, {
+              headers: { Authorization: `Bearer ${token}` },
+              timeout: 120000,
+            });
           } catch (uploadError: any) {
             console.error('Photo upload on update failed:', uploadError);
           }
         }
       } else {
-        // Create new milestone
-        try {
-          response = await axios.post(
-            `${API_BASE_URL}/api/admin/employees/dev`,
-            milestoneData,
-            { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
-          );
-          
-          // If we have a photo file and milestone was created, upload photo with the new ID
-          if (photoFile && response.data && response.data.id && !avatarPath) {
-            const formDataUpload = new FormData();
-            formDataUpload.append('file', photoFile);
-            formDataUpload.append('employee_id', response.data.id.toString());
-            try {
-              const uploadResponse = await axios.post(
-                `${API_BASE_URL}/api/admin/employees/upload-photo-dev`,
-                formDataUpload,
-                { 
-                  timeout: 120000
-                }
-              );
-              // Update milestone with photo path
-              avatarPath = uploadResponse.data.avatar_path;
-            } catch (uploadError: any) {
-              console.error('Photo upload after creation failed:', uploadError);
-            }
-          }
-        } catch (devError: any) {
-          response = await axios.post(
-            `${API_BASE_URL}/api/admin/employees`,
-            milestoneData,
-            { headers, timeout: 120000 }
-          );
-          
-          // Upload photo with new ID if needed
-          if (photoFile && response.data && response.data.id && !avatarPath) {
-            const formDataUpload = new FormData();
-            formDataUpload.append('file', photoFile);
-            formDataUpload.append('employee_id', response.data.id.toString());
-            const uploadHeaders: Record<string, string> = {};
-            if (token) {
-              uploadHeaders['Authorization'] = `Bearer ${token}`;
-            }
-            try {
-              const uploadResponse = await axios.post(
-                `${API_BASE_URL}/api/admin/employees/upload-photo`,
-                formDataUpload,
-                { 
-                  headers: uploadHeaders,
-                  timeout: 120000
-                }
-              );
-              // Photo uploaded and linked to milestone
-            } catch (uploadError: any) {
-              console.error('Photo upload after creation failed:', uploadError);
-            }
+        response = await api.post('admin/employees', milestoneData, { headers, timeout: 120000 });
+        if (photoFile && response?.data?.id && !avatarPath) {
+          const formDataUpload = new FormData();
+          formDataUpload.append('file', photoFile);
+          formDataUpload.append('employee_id', response.data.id.toString());
+          try {
+            const uploadResponse = await api.post('admin/employees/upload-photo', formDataUpload, {
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+              timeout: 120000,
+            });
+            avatarPath = uploadResponse.data?.avatar_path;
+          } catch (uploadError: any) {
+            console.error('Photo upload after creation failed:', uploadError);
           }
         }
       }
 
       toast.success(editingEmployee ? 'Employee milestone updated successfully' : 'Employee milestone saved successfully to backend');
       handleDialogClose();
-      fetchEmployees(); // Reload from backend
+      fetchEmployees();
     } catch (error: any) {
       console.error('Error saving employee:', error);
       const errorMessage = error.response?.data?.detail || error.message || 'Network Error';
-      const apiUrl = `${API_BASE_URL}/api/admin/employees/dev`;
-      console.error(`Failed to POST to: ${apiUrl}`, error);
-      
       if (error.code === 'ECONNREFUSED' || error.message?.includes('Network Error') || !error.response) {
-        toast.error(`Failed to save: Cannot connect to backend at ${API_BASE_URL}. Is the backend running?`);
+        toast.error('Failed to save: Cannot connect to backend. Is the backend running?');
       } else {
         toast.error(`Failed to save: ${errorMessage}`);
       }
@@ -353,26 +231,16 @@ export function EmployeesPage() {
   };
 
   const handleDelete = async (id: string) => {
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
     try {
-      // Try dev endpoint first
-      try {
-        await axios.delete(`${API_BASE_URL}/api/admin/employees/dev/${id}`, { timeout: 120000 });
-      } catch (devError: any) {
-        await axios.delete(`${API_BASE_URL}/api/admin/employees/${id}`, { headers, timeout: 120000 });
-      }
-      
+      await api.delete(`admin/employees/${id}`, { headers, timeout: 120000 });
       toast.success('Employee milestone deleted successfully');
-      fetchEmployees(); // Reload from backend
+      fetchEmployees();
     } catch (error: any) {
       console.error('Error deleting employee:', error);
       toast.error(`Failed to delete: ${error.response?.data?.detail || error.message}`);

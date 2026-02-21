@@ -10,6 +10,7 @@ import { sharePriceService } from '@/app/services/apiService';
 import { toast } from 'sonner';
 import { Upload, Plus, TrendingUp, DollarSign, Trash2, PieChart, X } from 'lucide-react';
 import axios from 'axios';
+import { api, getOrigin } from '@/app/services/api';
 
 export function RevenuePage() {
   const [excelFile, setExcelFile] = useState<File | null>(null);
@@ -105,34 +106,19 @@ export function RevenuePage() {
     localStorage.setItem('systemSuccessRateSubtitle', systemSuccessRateSubtitle);
   }, [systemSuccessRateSubtitle]);
   
-  // Load current revenue trend file from backend on mount (persisted; survives refresh)
+  // Load current revenue state from backend (production uses GET /api/dashboard/revenue; no current-file endpoint)
   useEffect(() => {
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8002';
-    const token = localStorage.getItem('authToken') || localStorage.getItem('token');
     const load = async () => {
       try {
-        try {
-          const res = await axios.get(`${API_BASE_URL}/api/admin/revenue/current-file-dev`, { timeout: 120000 });
-          if (res.data?.file_name) {
-            setCurrentRevenueFile({
-              file_name: res.data.file_name,
-              file_id: res.data.file_id ?? 0,
-            });
-          }
-        } catch (e: any) {
-          if (e.response?.status === 401 || e.response?.status === 403) {
-            const r = await axios.get(`${API_BASE_URL}/api/admin/revenue/current-file`, {
-              headers: token ? { Authorization: `Bearer ${token}` } : {},
-              timeout: 120000,
-            });
-            if (r.data?.file_name) {
-              setCurrentRevenueFile({ file_name: r.data.file_name, file_id: r.data.file_id ?? 0 });
-            }
-          }
-          // 404 or other: leave currentRevenueFile null
+        const res = await api.get('dashboard/revenue', { timeout: 120000 });
+        if (res.data?.file_name) {
+          setCurrentRevenueFile({
+            file_name: res.data.file_name,
+            file_id: res.data.file_id ?? 0,
+          });
         }
       } catch {
-        // no file or API down
+        // no file or API down: leave currentRevenueFile null
       } finally {
         setLoadingCurrentRevenueFile(false);
       }
@@ -143,12 +129,11 @@ export function RevenuePage() {
   // Load card titles and subtitles from backend config on mount
   useEffect(() => {
     const loadCardTitlesFromBackend = async () => {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const token = localStorage.getItem('authToken') || localStorage.getItem('token');
       if (!token) return;
 
       try {
-        const response = await axios.get(`${API_BASE_URL}/api/admin/config`, {
+        const response = await api.get('admin/config', {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 120000,
         });
@@ -180,7 +165,6 @@ export function RevenuePage() {
   }, []);
 
   const saveCardTitlesToBackend = async (): Promise<boolean> => {
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
     if (!token) {
       toast.error('Please log in to save card titles and subtitles to the main dashboard.');
@@ -188,8 +172,8 @@ export function RevenuePage() {
     }
 
     try {
-      await axios.put(
-        `${API_BASE_URL}/api/admin/config`,
+      await api.put(
+        'admin/config',
         {
           dashboard_payments_title: paymentCardTitle,
           dashboard_system_title: systemPerformanceCardTitle,
@@ -226,52 +210,23 @@ export function RevenuePage() {
   };
   
   // Upload PPT file to backend
-  const uploadPptFile = async (file: File): Promise<string | null> => {
+  const   uploadPptFile = async (file: File): Promise<string | null> => {
     setIsUploadingPpt(true);
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
     
     try {
       const formData = new FormData();
       formData.append('file', file);
       
-      const headers: Record<string, string> = {};
+      const headers: Record<string, string> = { 'Content-Type': 'multipart/form-data' };
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
-      // Try dev endpoint first (no auth)
-      let response;
-      try {
-        response = await axios.post(
-          `${API_BASE_URL}/api/admin/slideshow/upload-dev`,
-          formData,
-          { 
-            headers: { 'Content-Type': 'multipart/form-data' },
-            timeout: 120000
-          }
-        );
-      } catch (devError: any) {
-        // If dev endpoint fails, try auth endpoint
-        if (devError.response?.status === 401 || devError.response?.status === 403) {
-          try {
-            response = await axios.post(
-              `${API_BASE_URL}/api/admin/slideshow/upload`,
-              formData,
-              { 
-                headers: { ...headers, 'Content-Type': 'multipart/form-data' },
-                timeout: 120000
-              }
-            );
-          } catch (authError: any) {
-            toast.error('Authentication required. Please log in.');
-            setIsUploadingPpt(false);
-            return null;
-          }
-        } else {
-          throw devError;
-        }
-      }
+      const response = await api.post('admin/slideshow/upload', formData, {
+        headers,
+        timeout: 120000,
+      });
       
       const fileUrl = response.data.file_url;
       setUploadedPptUrl(fileUrl);
@@ -309,42 +264,15 @@ export function RevenuePage() {
       return;
     }
     
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
     
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
-      // Try dev endpoint first (no auth)
-      let response;
-      try {
-        response = await axios.post(
-          `${API_BASE_URL}/api/admin/slideshow/start-dev`,
-          {},
-          { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
-        );
-      } catch (devError: any) {
-        // If dev endpoint fails, try auth endpoint
-        if (devError.response?.status === 401 || devError.response?.status === 403) {
-          try {
-            response = await axios.post(
-              `${API_BASE_URL}/api/admin/slideshow/start`,
-              {},
-              { headers, timeout: 120000 }
-            );
-          } catch (authError: any) {
-            toast.error('Authentication required. Please log in.');
-            return;
-          }
-        } else {
-          throw devError;
-        }
-      }
+      await api.post('admin/slideshow/start', {}, { headers, timeout: 120000 });
       
       setIsSlideshowActive(true);
       toast.success('Slideshow started on frontend dashboard');
@@ -356,42 +284,15 @@ export function RevenuePage() {
   
   // Stop slideshow on frontend dashboard
   const handleStopSlideshow = async () => {
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
     
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
-      // Try dev endpoint first (no auth)
-      let response;
-      try {
-        response = await axios.post(
-          `${API_BASE_URL}/api/admin/slideshow/stop-dev`,
-          {},
-          { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
-        );
-      } catch (devError: any) {
-        // If dev endpoint fails, try auth endpoint
-        if (devError.response?.status === 401 || devError.response?.status === 403) {
-          try {
-            response = await axios.post(
-              `${API_BASE_URL}/api/admin/slideshow/stop`,
-              {},
-              { headers, timeout: 120000 }
-            );
-          } catch (authError: any) {
-            toast.error('Authentication required. Please log in.');
-            return;
-          }
-        } else {
-          throw devError;
-        }
-      }
+      await api.post('admin/slideshow/stop', {}, { headers, timeout: 120000 });
       
       setIsSlideshowActive(false);
       toast.success('Slideshow stopped on frontend dashboard');
@@ -431,9 +332,7 @@ export function RevenuePage() {
   const loadRevenueSummary = async () => {
     setIsLoadingRevenue(true);
     try {
-      // Use proxy in dev (empty string) or full URL in production
-      const API_BASE_URL = import.meta.env.VITE_API_URL || '';
-      const response = await axios.get(`${API_BASE_URL}/api/dashboard/revenue`, { timeout: 120000 });
+      const response = await api.get('dashboard/revenue', { timeout: 120000 });
       if (response.data) {
         setRevenueSummary({
           total_amount: Number(response.data.total_amount) || 0,
@@ -483,7 +382,6 @@ export function RevenuePage() {
 
     setIsSavingCharts(true);
 
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
 
     // Default colors for categories (cycling through brand colors)
@@ -495,48 +393,22 @@ export function RevenuePage() {
       color: colors[index % colors.length]
     }));
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    // First, check if backend is reachable
     try {
-      await axios.get(`${API_BASE_URL}/health`, { timeout: 120000 });
+      await axios.get(`${getOrigin()}/health`, { timeout: 120000 });
     } catch (healthError: any) {
       console.error('Backend health check failed:', healthError.message);
-      toast.error(`Backend not reachable at ${API_BASE_URL}. Please ensure the backend server is running.`);
+      toast.error('Backend not reachable. Please ensure the backend server is running.');
       setIsSavingCharts(false);
       return;
     }
 
-    // Try to save to backend API (dev endpoint without auth)
     try {
-      let response;
-      try {
-        response = await axios.post(
-          `${API_BASE_URL}/api/admin/revenue/proportions/manual-dev`,
-          { proportions: proportionsData },
-          { 
-            headers: { 'Content-Type': 'application/json' },
-            timeout: 120000
-          }
-        );
-        console.log('Successfully saved via dev endpoint');
-      } catch (devError: any) {
-        console.log('Dev endpoint failed, trying auth endpoint...');
-        response = await axios.post(
-          `${API_BASE_URL}/api/admin/revenue/proportions/manual`,
-          { proportions: proportionsData },
-          { 
-            headers,
-            timeout: 120000
-          }
-        );
-        console.log('Successfully saved via auth endpoint');
-      }
+      await api.post('admin/revenue/proportions/manual', { proportions: proportionsData }, { headers, timeout: 120000 });
 
       // Successfully saved to backend
       localStorage.setItem('chartProportions', JSON.stringify(proportionsData));
@@ -573,91 +445,23 @@ export function RevenuePage() {
 
     setIsUploading(true);
     try {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-
-      // #region agent log
-      fetch('http://127.0.0.1:7254/ingest/ea07c2c1-9a77-4dea-9334-f6ccf4b26b3e', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: 'debug-session',
-          runId: 'pre-fix',
-          hypothesisId: 'H1',
-          location: 'RevenuePage.tsx:handleExcelUpload:beforeRequest',
-          message: 'Starting Excel upload',
-          data: { apiBaseUrl: API_BASE_URL, hasToken: !!token, fileName: excelFile.name },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion agent log
-
       const formData = new FormData();
       formData.append('file', excelFile);
 
-      // Try dev endpoint first (no auth)
-      let response;
-      try {
-        response = await axios.post(
-          `${API_BASE_URL}/api/admin/revenue/upload-dev`,
-          formData,
-          {
-            headers: { 'Content-Type': 'multipart/form-data' },
-            timeout: 120000,
-          }
-        );
-      } catch (devError: any) {
-        // #region agent log
-        fetch('http://127.0.0.1:7254/ingest/ea07c2c1-9a77-4dea-9334-f6ccf4b26b3e', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId: 'debug-session',
-            runId: 'pre-fix',
-            hypothesisId: 'H2',
-            location: 'RevenuePage.tsx:handleExcelUpload:devError',
-            message: 'Dev upload failed',
-            data: {
-              message: devError?.message,
-              code: devError?.code,
-              status: devError?.response?.status ?? null,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion agent log
-        // If dev endpoint fails due to auth, fall back to authenticated endpoint
-        if (devError.response?.status === 401 || devError.response?.status === 403) {
-          if (!token) {
-            toast.error('Authentication required. Please log in.');
-            setIsUploading(false);
-            return;
-          }
-
-          response = await axios.post(
-            `${API_BASE_URL}/api/admin/revenue/upload`,
-            formData,
-            {
-              headers: {
-                'Content-Type': 'multipart/form-data',
-                'Authorization': `Bearer ${token}`,
-              },
-              timeout: 120000,
-            }
-          );
-        } else {
-          throw devError;
-        }
+      const headers: Record<string, string> = { 'Content-Type': 'multipart/form-data' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
+
+      const response = await api.post('admin/revenue/upload', formData, { headers, timeout: 120000 });
 
       console.log('Revenue Excel upload response:', response.data);
 
-      // After backend has processed the file, fetch the latest
-      // trends and proportions and notify the main dashboard.
       try {
         const [trendsRes, proportionsRes] = await Promise.all([
-          axios.get(`${API_BASE_URL}/api/dashboard/revenue-trends`, { timeout: 120000 }),
-          axios.get(`${API_BASE_URL}/api/dashboard/revenue-proportions`, { timeout: 120000 }),
+          api.get('dashboard/revenue-trends', { timeout: 120000 }),
+          api.get('dashboard/revenue-proportions', { timeout: 120000 }),
         ]);
 
         if (trendsRes.data) {
@@ -685,25 +489,6 @@ export function RevenuePage() {
       });
     } catch (error) {
       console.error('Error uploading revenue Excel file:', error);
-      // #region agent log
-      fetch('http://127.0.0.1:7254/ingest/ea07c2c1-9a77-4dea-9334-f6ccf4b26b3e', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: 'debug-session',
-          runId: 'pre-fix',
-          hypothesisId: 'H3',
-          location: 'RevenuePage.tsx:handleExcelUpload:catch',
-          message: 'Upload threw error',
-          data: {
-            message: (error as any)?.message ?? null,
-            code: (error as any)?.code ?? null,
-            status: (error as any)?.response?.status ?? null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion agent log
       const message = (error as any)?.response?.data?.detail || (error as Error).message || 'Upload failed';
       toast.error(`Upload failed: ${message}`);
     } finally {
@@ -712,25 +497,10 @@ export function RevenuePage() {
   };
 
   const handleDeleteRevenueFile = async () => {
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8002';
-    const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-    try {
-      try {
-        await axios.delete(`${API_BASE_URL}/api/admin/revenue/current-file-dev`, { timeout: 120000 });
-      } catch (e: any) {
-        if (e.response?.status === 401 || e.response?.status === 403) {
-          await axios.delete(`${API_BASE_URL}/api/admin/revenue/current-file`, {
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
-            timeout: 120000,
-          });
-        } else throw e;
-      }
-      setCurrentRevenueFile(null);
-      setExcelFile(null);
-      toast.success('Revenue file cleared. You can upload a new Excel file.');
-    } catch (e: any) {
-      toast.error(e.response?.data?.detail || 'Failed to clear file');
-    }
+    // Production backend has no current-file endpoint; clear local state only
+    setCurrentRevenueFile(null);
+    setExcelFile(null);
+    toast.success('Revenue file cleared. You can upload a new Excel file.');
   };
 
   const handleManualEntry = async () => {
@@ -753,82 +523,29 @@ export function RevenuePage() {
     
     console.log(`Converting ${revenueInMillions}M to $${revenueInDollars.toLocaleString()}`);
 
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
     
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-      // First, check if backend is reachable
-      try {
-        console.log('Testing backend connection:', `${API_BASE_URL}/health`);
-        await axios.get(`${API_BASE_URL}/health`, { timeout: 120000 });
-        console.log('Backend is reachable!');
-      } catch (healthError: any) {
-        console.error('Backend health check failed:', healthError.message);
-        toast.error(`Backend not reachable at ${API_BASE_URL}. Please ensure the backend server is running.`);
-        // Still try to save, but show warning
-      }
+    try {
+      await axios.get(`${getOrigin()}/health`, { timeout: 120000 });
+    } catch (healthError: any) {
+      console.error('Backend health check failed:', healthError.message);
+      toast.error('Backend not reachable. Please ensure the backend server is running.');
+    }
 
-      // Try to save to backend API (dev endpoint without auth)
-      try {
-        console.log('Attempting to save to backend:', `${API_BASE_URL}/api/admin/revenue/manual-dev`);
-        console.log('Payload:', { total_amount: revenueData.total_amount, percentage_change: revenueData.percentage_change });
-        
-        // Try dev endpoint first (no auth required)
-        let response;
-        try {
-          response = await axios.post(
-            `${API_BASE_URL}/api/admin/revenue/manual-dev`,
-            {
-              total_amount: revenueData.total_amount,
-              percentage_change: revenueData.percentage_change,
-            },
-            { 
-              headers: { 'Content-Type': 'application/json' },
-              timeout: 120000 // 10 second timeout
-            }
-          );
-          console.log('Successfully saved via dev endpoint');
-        } catch (devError: any) {
-          console.error('Dev endpoint error:', {
-            message: devError.message,
-            code: devError.code,
-            status: devError.response?.status,
-            data: devError.response?.data
-          });
-          
-          // If dev endpoint fails, try the auth endpoint
-          console.log('Dev endpoint failed, trying auth endpoint...');
-          try {
-            response = await axios.post(
-              `${API_BASE_URL}/api/admin/revenue/manual`,
-              {
-                total_amount: revenueData.total_amount,
-                percentage_change: revenueData.percentage_change,
-              },
-              { 
-                headers,
-                timeout: 120000 // 10 second timeout
-              }
-            );
-            console.log('Successfully saved via auth endpoint');
-          } catch (authError: any) {
-            console.error('Auth endpoint also failed:', {
-              message: authError.message,
-              code: authError.code,
-              status: authError.response?.status,
-              data: authError.response?.data
-            });
-            throw authError; // Re-throw to be caught by outer catch
-          }
-        }
-      
+    try {
+      const response = await api.post(
+        'admin/revenue/manual',
+        {
+          total_amount: revenueData.total_amount,
+          percentage_change: revenueData.percentage_change,
+        },
+        { headers, timeout: 120000 }
+      );
       console.log('Backend response:', response.data);
       
       // Successfully saved to backend
@@ -870,7 +587,7 @@ export function RevenuePage() {
           detail: revenueData
         }));
         
-        toast.warning('Backend unavailable - saved locally. Please ensure backend is running at ' + API_BASE_URL);
+        toast.warning('Backend unavailable - saved locally. Please ensure backend is running.');
         setManualRevenue('');
         setLastMonth('');
         setIsUploading(false);
@@ -914,59 +631,26 @@ export function RevenuePage() {
       change_percentage: parseFloat(manualSharePriceChange),
     };
 
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    // First, check if backend is reachable
     try {
-      console.log('Testing backend connection:', `${API_BASE_URL}/health`);
-      await axios.get(`${API_BASE_URL}/health`, { timeout: 120000 });
-      console.log('Backend is reachable!');
+      await axios.get(`${getOrigin()}/health`, { timeout: 120000 });
     } catch (healthError: any) {
-      console.error('Backend health check failed:', healthError.message);
-      toast.error(`Backend not reachable at ${API_BASE_URL}. Please ensure the backend server is running.`);
+      toast.error('Backend not reachable. Please ensure the backend server is running.');
       setIsSavingSharePrice(false);
       return;
     }
 
-    // Try to save to backend API (dev endpoint without auth)
     try {
-      let response;
-      try {
-        response = await axios.post(
-          `${API_BASE_URL}/api/admin/revenue/share-price/manual-dev`,
-          {
-            price: sharePriceData.price,
-            change_percentage: sharePriceData.change_percentage,
-          },
-          { 
-            headers: { 'Content-Type': 'application/json' },
-            timeout: 120000
-          }
-        );
-        console.log('Successfully saved via dev endpoint');
-      } catch (devError: any) {
-        console.log('Dev endpoint failed, trying auth endpoint...');
-        response = await axios.post(
-          `${API_BASE_URL}/api/admin/revenue/share-price/manual`,
-          {
-            price: sharePriceData.price,
-            change_percentage: sharePriceData.change_percentage,
-          },
-          { 
-            headers,
-            timeout: 120000
-          }
-        );
-        console.log('Successfully saved via auth endpoint');
-      }
+      await api.post(
+        'admin/revenue/share-price/manual',
+        { price: sharePriceData.price, change_percentage: sharePriceData.change_percentage },
+        { headers, timeout: 120000 }
+      );
 
       // Successfully saved to backend
       localStorage.setItem('sharePriceData', JSON.stringify(sharePriceData));
@@ -1013,49 +697,35 @@ export function RevenuePage() {
       date: today
     };
 
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
     try {
-      await axios.get(`${API_BASE_URL}/health`, { timeout: 120000 });
+      await axios.get(`${getOrigin()}/health`, { timeout: 120000 });
     } catch (healthError: any) {
-      toast.error(`Backend not reachable at ${API_BASE_URL}. Please ensure the backend server is running.`);
+      toast.error('Backend not reachable. Please ensure the backend server is running.');
       setIsSavingPayment(false);
       return;
     }
 
     try {
-      let response;
-      try {
-        response = await axios.post(
-          `${API_BASE_URL}/api/admin/payments`,
-          paymentData,
-          { headers, timeout: 120000 }
-        );
-      } catch (authError: any) {
-        if (authError.response?.status === 401 || authError.response?.status === 403) {
-          toast.error('Authentication required. Please log in.');
-          setIsSavingPayment(false);
-          return;
-        }
-        throw authError;
-      }
-
+      await api.post('admin/payments', paymentData, { headers, timeout: 120000 });
       toast.success('Customizable card 1 updated');
       await saveCardTitlesToBackend();
       setManualPaymentAmount('');
       setManualPaymentTransactions('');
-      setIsSavingPayment(false);
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || error.message || 'Failed to save payment data';
+    } catch (authError: any) {
+      if (authError.response?.status === 401 || authError.response?.status === 403) {
+        toast.error('Authentication required. Please log in.');
+        setIsSavingPayment(false);
+        return;
+      }
+      const errorMessage = authError.response?.data?.detail || authError.message || 'Failed to save payment data';
       toast.error(`Error: ${errorMessage}`);
+    } finally {
       setIsSavingPayment(false);
     }
   };
@@ -1072,48 +742,33 @@ export function RevenuePage() {
       success_rate: parseFloat(manualSuccessRate)
     };
 
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
     try {
-      await axios.get(`${API_BASE_URL}/health`, { timeout: 120000 });
+      await axios.get(`${getOrigin()}/health`, { timeout: 120000 });
     } catch (healthError: any) {
-      toast.error(`Backend not reachable at ${API_BASE_URL}. Please ensure the backend server is running.`);
+      toast.error('Backend not reachable. Please ensure the backend server is running.');
       setIsSavingSystem(false);
       return;
     }
 
     try {
-      let response;
-      try {
-        response = await axios.post(
-          `${API_BASE_URL}/api/admin/system`,
-          systemData,
-          { headers, timeout: 120000 }
-        );
-      } catch (authError: any) {
-        if (authError.response?.status === 401 || authError.response?.status === 403) {
-          toast.error('Authentication required. Please log in.');
-          setIsSavingSystem(false);
-          return;
-        }
-        throw authError;
-      }
-
+      await api.post('admin/system', systemData, { headers, timeout: 120000 });
       toast.success('Customizable card 2 updated');
       setManualUptime('');
       setManualSuccessRate('');
-      setIsSavingSystem(false);
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || error.message || 'Failed to save system performance data';
-      toast.error(`Error: ${errorMessage}`);
+    } catch (authError: any) {
+      if (authError.response?.status === 401 || authError.response?.status === 403) {
+        toast.error('Authentication required. Please log in.');
+      } else {
+        const errorMessage = authError.response?.data?.detail || authError.message || 'Failed to save system performance data';
+        toast.error(`Error: ${errorMessage}`);
+      }
+    } finally {
       setIsSavingSystem(false);
     }
   };

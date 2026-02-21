@@ -35,7 +35,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchUser = async () => {
     try {
-      const response = await api.get('/api/admin/auth/me')
+      const response = await api.get('admin/auth/me')
       setUser(response.data)
     } catch (error) {
       localStorage.removeItem('token')
@@ -47,7 +47,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const login = (provider: 'google' | 'microsoft') => {
-    window.location.href = `http://localhost:8000/api/admin/auth/login/${provider}`
+    const base = (import.meta.env.VITE_API_URL ?? '').toString().trim()
+    const origin = base ? base.replace(/\/+$/, '') : (typeof window !== 'undefined' ? window.location.origin : '')
+    window.location.href = `${origin}/api/admin/auth/login/${provider}`
   }
 
   const logout = () => {
