@@ -25,6 +25,18 @@ export const api = axios.create({
   timeout: 60000, // 60s — slow database wake-ups don't crash initial login
 });
 
+// Log final request URL at runtime for verification; ensure FormData requests get multipart Content-Type
+api.interceptors.request.use((config) => {
+  const base = (config.baseURL || '').replace(/\/+$/, '');
+  const path = config.url && config.url.startsWith('http') ? config.url : (config.url && config.url.startsWith('/') ? config.url : `/${config.url || ''}`);
+  const finalUrl = path.startsWith('http') ? path : `${base}${path}`;
+  console.log('[API]', config.method?.toUpperCase(), finalUrl);
+  if (config.data instanceof FormData) {
+    delete (config.headers as Record<string, unknown>)['Content-Type'];
+  }
+  return config;
+});
+
 /** Origin only (no /api) for routes like /health mounted at root. Uses VITE_API_URL when set. */
 export function getOrigin(): string {
   const base = import.meta.env.VITE_API_URL;

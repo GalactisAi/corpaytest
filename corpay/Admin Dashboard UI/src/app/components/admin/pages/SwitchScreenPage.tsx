@@ -7,7 +7,7 @@ import { Tabs, TabsList, TabsTrigger } from '../../ui/tabs';
 import { FileUpload } from '../FileUpload';
 import { toast } from 'sonner';
 import { Presentation, FileText, BarChart3, X } from 'lucide-react';
-import axios from 'axios';
+import { api } from '@/app/services/api';
 
 const STORAGE_KEY = 'corpay_admin_switch_screen';
 
@@ -82,10 +82,9 @@ export function SwitchScreenPage() {
 
   // Load persisted slideshow file from backend on mount (so it survives refresh)
   useEffect(() => {
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
-    fetch(`${API_BASE_URL}/api/dashboard/slideshow`)
-      .then((res) => res.json())
-      .then((data) => {
+    api.get('dashboard/slideshow')
+      .then((res) => {
+        const data = res.data || {};
         if (data.file_url && data.file_name) {
           setUploadedFileName(data.file_name);
           setUploadedPptUrl(data.file_url);
@@ -106,7 +105,6 @@ export function SwitchScreenPage() {
 
   const uploadPptFile = async (file: File): Promise<string | null> => {
     setIsUploadingPpt(true);
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
 
     try {
@@ -118,34 +116,18 @@ export function SwitchScreenPage() {
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      // Try dev endpoint first (no auth)
       let response;
       try {
-        response = await axios.post(
-          `${API_BASE_URL}/api/admin/slideshow/upload-dev`,
-          formData,
-          {
-            headers: { 'Content-Type': 'multipart/form-data' },
-            timeout: 120000,
-          }
-        );
+        response = await api.post('admin/slideshow/upload-dev', formData, {
+          headers: {},
+          timeout: 120000,
+        });
       } catch (devError: any) {
-        // If dev endpoint fails, try auth endpoint
         if (devError.response?.status === 401 || devError.response?.status === 403) {
-          try {
-            response = await axios.post(
-              `${API_BASE_URL}/api/admin/slideshow/upload`,
-              formData,
-              {
-                headers: { ...headers, 'Content-Type': 'multipart/form-data' },
-                timeout: 120000,
-              }
-            );
-          } catch (authError: any) {
-            toast.error('Authentication required. Please log in.');
-            setIsUploadingPpt(false);
-            return null;
-          }
+          response = await api.post('admin/slideshow/upload', formData, {
+            headers: { ...headers },
+            timeout: 120000,
+          });
         } else {
           throw devError;
         }
@@ -177,19 +159,17 @@ export function SwitchScreenPage() {
   };
 
   const handleDeleteSlideshowFile = async () => {
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8002';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
     try {
       try {
-        await axios.delete(`${API_BASE_URL}/api/admin/slideshow/file-dev`, { timeout: 120000 });
+        await api.delete('admin/slideshow/file-dev', { timeout: 120000 });
       } catch (devErr: any) {
         if (devErr.response?.status === 401 || devErr.response?.status === 403) {
-          await axios.delete(`${API_BASE_URL}/api/admin/slideshow/file`, {
+          await api.delete('admin/slideshow/file', {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
             timeout: 120000,
           });
         } else if (devErr.response?.status === 404) {
-          // Already removed or endpoint not found; clear UI so upload option shows again
           setUploadedPptUrl(null);
           setUploadedFileName(null);
           setPptFile(null);
@@ -202,7 +182,6 @@ export function SwitchScreenPage() {
       setPptFile(null);
       toast.success('File removed. You can upload a new file.');
     } catch (e: any) {
-      // On 404 (e.g. proxy/route), still clear local state so the card goes away
       if (e.response?.status === 404) {
         setUploadedPptUrl(null);
         setUploadedFileName(null);
@@ -215,25 +194,16 @@ export function SwitchScreenPage() {
   };
 
   const setSlideshowUrl = async (url: string): Promise<boolean> => {
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
     try {
-      await axios.post(
-        `${API_BASE_URL}/api/admin/slideshow/set-url-dev`,
-        { embed_url: url },
-        { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
-      );
+      await api.post('admin/slideshow/set-url-dev', { embed_url: url }, { headers: { 'Content-Type': 'application/json' }, timeout: 120000 });
       return true;
     } catch (devError: any) {
       if (devError.response?.status === 401 || devError.response?.status === 403) {
         try {
-          await axios.post(
-            `${API_BASE_URL}/api/admin/slideshow/set-url`,
-            { embed_url: url },
-            { headers, timeout: 120000 }
-          );
+          await api.post('admin/slideshow/set-url', { embed_url: url }, { headers, timeout: 120000 });
           return true;
         } catch {
           toast.error('Authentication required. Please log in.');
@@ -245,7 +215,6 @@ export function SwitchScreenPage() {
   };
 
   const handleStartSlideshow = async () => {
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -261,18 +230,10 @@ export function SwitchScreenPage() {
         await setSlideshowUrl(url);
         const intervalSeconds = Math.max(1, Math.min(300, slideIntervalSeconds)) || 5;
         try {
-          await axios.post(
-            `${API_BASE_URL}/api/admin/slideshow/start-dev`,
-            { interval_seconds: intervalSeconds },
-            { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
-          );
+          await api.post('admin/slideshow/start-dev', { interval_seconds: intervalSeconds }, { headers: { 'Content-Type': 'application/json' }, timeout: 120000 });
         } catch (devErr: any) {
           if (devErr.response?.status === 401 || devErr.response?.status === 403) {
-            await axios.post(
-              `${API_BASE_URL}/api/admin/slideshow/start`,
-              { interval_seconds: intervalSeconds },
-              { headers, timeout: 120000 }
-            );
+            await api.post('admin/slideshow/start', { interval_seconds: intervalSeconds }, { headers, timeout: 120000 });
           } else throw devErr;
         }
         setIsSlideshowActive(true);
@@ -306,25 +267,15 @@ export function SwitchScreenPage() {
 
     try {
       const intervalSeconds = Math.max(1, Math.min(300, slideIntervalSeconds)) || 5;
-      let response;
       try {
-        response = await axios.post(
-          `${API_BASE_URL}/api/admin/slideshow/start-dev`,
-          { interval_seconds: intervalSeconds },
-          { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
-        );
+        await api.post('admin/slideshow/start-dev', { interval_seconds: intervalSeconds }, { headers: { 'Content-Type': 'application/json' }, timeout: 120000 });
       } catch (devError: any) {
         if (devError.response?.status === 401 || devError.response?.status === 403) {
-          response = await axios.post(
-            `${API_BASE_URL}/api/admin/slideshow/start`,
-            { interval_seconds: intervalSeconds },
-            { headers, timeout: 120000 }
-          );
+          await api.post('admin/slideshow/start', { interval_seconds: intervalSeconds }, { headers, timeout: 120000 });
         } else {
           throw devError;
         }
       }
-
       setIsSlideshowActive(true);
       toast.success('Switched main screen to slideshow');
     } catch (error: any) {
@@ -334,41 +285,20 @@ export function SwitchScreenPage() {
   };
 
   const handleStopSlideshow = async () => {
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const token = localStorage.getItem('authToken') || localStorage.getItem('token');
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
 
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      let response;
       try {
-        response = await axios.post(
-          `${API_BASE_URL}/api/admin/slideshow/stop-dev`,
-          {},
-          { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
-        );
+        await api.post('admin/slideshow/stop-dev', {}, { headers: { 'Content-Type': 'application/json' }, timeout: 120000 });
       } catch (devError: any) {
         if (devError.response?.status === 401 || devError.response?.status === 403) {
-          try {
-            response = await axios.post(
-              `${API_BASE_URL}/api/admin/slideshow/stop`,
-              {},
-              { headers, timeout: 120000 }
-            );
-          } catch (authError: any) {
-            toast.error('Authentication required. Please log in.');
-            return;
-          }
+          await api.post('admin/slideshow/stop', {}, { headers, timeout: 120000 });
         } else {
           throw devError;
         }
       }
-
       setIsSlideshowActive(false);
       toast.success('Switched main screen back to dashboard');
     } catch (error: any) {
