@@ -153,7 +153,8 @@ class _RetryingQuery:
                 start = perf_counter() if should_time else None
                 result = getattr(q, fn_name)(*args, **kwargs)
                 if should_time and start is not None:
-                    _log_query_timing(stmt or q, perf_counter() - start, attempt)
+                    target_stmt = stmt if stmt is not None else q
+                    _log_query_timing(target_stmt, perf_counter() - start, attempt)
                 return result
             except Exception as e:
                 if not _is_retryable(e) or attempt == _MAX_DB_RETRIES:
