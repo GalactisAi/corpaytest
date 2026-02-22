@@ -16,6 +16,17 @@ from app.models.user import User
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/admin/revenue", tags=["admin-revenue"])
+_DEBUG_LOG_PATH = (os.getenv("APP_DEBUG_LOG_PATH") or "").strip()
+
+
+def _write_debug_log(line: str) -> None:
+    if not _DEBUG_LOG_PATH:
+        return
+    try:
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:
+        pass
 
 
 def _valid_revenue_amount(value: Any) -> Optional[float]:
@@ -161,8 +172,7 @@ async def upload_revenue_file_dev(
     try:
         # Debug log: entry into upload-dev
         try:
-            with open("/Users/madhujitharumugam/Desktop/latest_corpgit/corpay/.cursor/debug.log", "a") as f:
-                f.write('{"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"H4","location":"revenue.py:upload_revenue_file_dev:start","message":"Entered upload-dev","data":{"fileName":"%s"},"timestamp":%d}\\n' % (file.filename, int(datetime.now().timestamp() * 1000)))
+            _write_debug_log('{"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"H4","location":"revenue.py:upload_revenue_file_dev:start","message":"Entered upload-dev","data":{"fileName":"%s"},"timestamp":%d}\\n' % (file.filename, int(datetime.now().timestamp() * 1000)))
         except Exception:
             pass
 
@@ -253,8 +263,7 @@ async def upload_revenue_file_dev(
         _set_config_value(db, "revenue_trend_file_path", stored_path)
 
         try:
-            with open("/Users/madhujitharumugam/Desktop/latest_corpgit/corpay/.cursor/debug.log", "a") as f:
-                f.write('{"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"H5","location":"revenue.py:upload_revenue_file_dev:success","message":"upload-dev processed successfully","data":{"fileId":%d},"timestamp":%d}\\n' % (file_upload.id, int(datetime.now().timestamp() * 1000)))
+            _write_debug_log('{"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"H5","location":"revenue.py:upload_revenue_file_dev:success","message":"upload-dev processed successfully","data":{"fileId":%d},"timestamp":%d}\\n' % (file_upload.id, int(datetime.now().timestamp() * 1000)))
         except Exception:
             pass
 
@@ -266,8 +275,7 @@ async def upload_revenue_file_dev(
     except Exception as e:
         # Catch-all for unexpected errors
         try:
-            with open("/Users/madhujitharumugam/Desktop/latest_corpgit/corpay/.cursor/debug.log", "a") as f:
-                f.write('{"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"H6","location":"revenue.py:upload_revenue_file_dev:exception","message":"Unexpected exception during upload-dev","data":{"error":"%s"},"timestamp":%d}\\n' % (str(e).replace("\\", "\\\\"), int(datetime.now().timestamp() * 1000)))
+            _write_debug_log('{"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"H6","location":"revenue.py:upload_revenue_file_dev:exception","message":"Unexpected exception during upload-dev","data":{"error":"%s"},"timestamp":%d}\\n' % (str(e).replace("\\", "\\\\"), int(datetime.now().timestamp() * 1000)))
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"Unexpected error processing file: {str(e)}")

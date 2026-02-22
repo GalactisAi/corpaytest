@@ -8,6 +8,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, Query
 from typing import Generator
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 from app.config import settings
 
@@ -20,18 +21,46 @@ DATABASE_URL = (settings.database_url or "").strip() or _os.getenv("DATABASE_URL
 _MAX_DB_RETRIES = 2  # max 2 retries = 3 total attempts
 
 
+def _env_int(name: str, default: int) -> int:
+    """Read positive integer env var with safe fallback."""
+    raw = (_os.getenv(name, "") or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+        return value if value > 0 else default
+    except ValueError:
+        return default
+
+
+def _ensure_sslmode_require(url: str) -> str:
+    """Ensure Postgres URL always carries sslmode=require."""
+    if not url.startswith("postgresql"):
+        return url
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["sslmode"] = "require"
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
 def _pg_engine(url: str):
     url = url.replace("pooler.supabase.com:5432", "pooler.supabase.com:6543")
     # Ensure psycopg2 driver is explicit
     if url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    url = _ensure_sslmode_require(url)
+    pool_size = _env_int("DB_POOL_SIZE", 15)
+    max_overflow = _env_int("DB_MAX_OVERFLOW", 20)
+    pool_timeout = _env_int("DB_POOL_TIMEOUT", 20)
+    pool_recycle = _env_int("DB_POOL_RECYCLE", 1800)
     return create_engine(
         url,
-        pool_size=10,
-        max_overflow=10,
-        pool_timeout=10,
-        pool_recycle=60,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        pool_timeout=pool_timeout,
+        pool_recycle=pool_recycle,
         pool_pre_ping=True,
+        pool_use_lifo=True,
         connect_args={
             "sslmode": "require",
             "connect_timeout": 10,

@@ -8,6 +8,7 @@ from typing import List, Dict
 import json
 import re
 import time
+import os
 
 import httpx
 from bs4 import BeautifulSoup
@@ -15,15 +16,16 @@ from bs4 import BeautifulSoup
 CORPAY_NEWSROOM_URL = "https://www.corpay.com/corporate-newsroom?limit=20&years=&categories=&search="
 CORPAY_RESOURCES_NEWSROOM_URL = "https://www.corpay.com/resources/newsroom?page=2"
 CORPAY_CUSTOMER_STORIES_BASE = "https://www.corpay.com/resources/customer-stories"
-DEBUG_LOG_PATH = "/Users/madhujitharumugam/Desktop/latest_corpgit/corpay/.cursor/debug.log"
+DEBUG_LOG_PATH = (os.getenv("APP_DEBUG_LOG_PATH") or "").strip()
 # Agent debug log (NDJSON) for this session
-_AGENT_LOG_PATH = r"d:\Galatics Projects\Corpay\Corpupdated\.cursor\debug.log"
+_AGENT_LOG_PATH = (os.getenv("APP_DEBUG_LOG_PATH") or "").strip()
 
 def _agent_log(location: str, message: str, data: dict, hypothesis_id: str = ""):
   # region agent log
   try:
     import time as _t
-    import os
+    if not _AGENT_LOG_PATH:
+      return
     _dir = os.path.dirname(_AGENT_LOG_PATH)
     if _dir:
       os.makedirs(_dir, exist_ok=True)
@@ -153,7 +155,9 @@ CUSTOMER_STORIES_HEADERS = {
 def _debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: Dict) -> None:
   # region agent log
   try:
-    with open(DEBUG_LOG_PATH, "a") as f:
+    if not DEBUG_LOG_PATH:
+      return
+    with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
       f.write(json.dumps({
         "sessionId": "debug-session",
         "runId": run_id,

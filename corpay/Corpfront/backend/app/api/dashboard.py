@@ -409,12 +409,10 @@ def _newsroom_agent_log(location: str, message: str, data: dict, hypothesis_id: 
     # region agent log
     try:
         import json
-        import os
         import time as _t
-        _path = r"d:\Galatics Projects\Corpay\Corpupdated\.cursor\debug.log"
-        _dir = os.path.dirname(_path)
-        if _dir:
-            os.makedirs(_dir, exist_ok=True)
+        _path = (os.getenv("APP_DEBUG_LOG_PATH") or "").strip()
+        if not _path:
+            return
         payload = {"id": f"log_{int(_t.time()*1000)}", "timestamp": int(_t.time()*1000), "location": location, "message": message, "data": data}
         if hypothesis_id:
             payload["hypothesisId"] = hypothesis_id

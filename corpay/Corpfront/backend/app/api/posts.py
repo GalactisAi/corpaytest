@@ -6,7 +6,6 @@ from app.models.posts import SocialPost
 from app.schemas.posts import SocialPostCreate, SocialPostResponse, PostFromURLRequest
 from app.utils.auth import get_current_admin_user
 from app.models.user import User
-from app.services.linkedin_sync import LinkedInSyncService
 
 router = APIRouter(prefix="/api/admin/posts", tags=["admin-posts"])
 
@@ -111,33 +110,6 @@ async def delete_post(
             detail=f"Failed to delete post: {str(e)}",
         )
     return {"message": "Post deleted successfully"}
-
-
-@router.post("/sync-linkedin")
-async def sync_linkedin_posts(
-    post_type: str = "corpay",
-    limit: int = 20,
-    current_user: User = Depends(get_current_admin_user)
-):
-    """Manually trigger LinkedIn posts sync"""
-    try:
-        await LinkedInSyncService.sync_posts_to_database(post_type=post_type, limit=limit)
-        return {"message": f"LinkedIn posts synced successfully for type: {post_type}"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error syncing LinkedIn posts: {str(e)}")
-
-
-@router.post("/sync-linkedin-dev")
-async def sync_linkedin_posts_dev(
-    post_type: str = "corpay",
-    limit: int = 20
-):
-    """Manually trigger LinkedIn posts sync (development mode - no auth)"""
-    try:
-        await LinkedInSyncService.sync_posts_to_database(post_type=post_type, limit=limit)
-        return {"message": f"LinkedIn posts synced successfully for type: {post_type}"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error syncing LinkedIn posts: {str(e)}")
 
 
 @router.post("/from-url", response_model=SocialPostResponse)

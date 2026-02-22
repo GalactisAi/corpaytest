@@ -63,13 +63,6 @@ class Settings(BaseSettings):
     # External APIs
     share_price_api_url: str = ""
     share_price_api_key: str = ""
-    linkedin_api_url: str = ""
-    linkedin_api_key: str = ""
-    linkedin_client_id: str = ""
-    linkedin_client_secret: str = ""
-    linkedin_company_url: str = "https://www.linkedin.com/company/galactisaitech/posts/?feedView=all"
-    linkedin_company_urn: str = ""  # LinkedIn URN for company (e.g., urn:li:organization:123456)
-    linkedin_vanity_name: str = "galactisaitech"  # Company vanity name from URL
     powerbi_client_id: str = ""
     powerbi_client_secret: str = ""
     powerbi_tenant_id: str = ""

@@ -1,57 +1,67 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 from pathlib import Path
 from contextlib import asynccontextmanager
-import asyncio
 import json
 import os
 from app.config import settings
 from app.database import engine, Base, SessionLocal
 from app.api import dashboard, auth, revenue, posts, employees, payments, system, config, slideshow
-from app.api import linkedin_auth, linkedin_auth
-from app.services.linkedin_sync import run_periodic_sync
 from app.models.user import User
 import bcrypt
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def init_default_admin():
-    """Initialize default admin user - always ensure it exists with correct password."""
+    """Initialize default admin user without destructive delete/reset."""
+    auto_init = _env_bool("AUTO_INIT_ADMIN", default=(settings.environment != "production"))
+    if not auto_init:
+        print("Skipping default admin bootstrap (AUTO_INIT_ADMIN disabled)")
+        return
+
+    admin_email = (os.getenv("DEFAULT_ADMIN_EMAIL") or "admin@corpay.com").strip()
+    admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD") or "Cadmin@1"
+    reset_password = _env_bool("ADMIN_RESET_PASSWORD_ON_STARTUP", default=False)
+
     db = SessionLocal()
     try:
-        # Hash the default password: Cadmin@1
-        password = "Cadmin@1"
-        password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        admin_user = db.query(User).filter(User.email == admin_email).first()
+        password_hash = bcrypt.hashpw(admin_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-        # Delete existing admin user to ensure clean state
-        db.query(User).filter(User.email == "admin@corpay.com").delete()
-        db.commit()
-
-        # Create admin user with correct credentials
-        admin_user = User(
-            email="admin@corpay.com",
-            name="Admin User",
-            password_hash=password_hash,
-            is_admin=1,
-        )
-        db.add(admin_user)
-        db.commit()
-
-        # Verify it was created correctly
-        verify_user = db.query(User).filter(User.email == "admin@corpay.com").first()
-        if verify_user:
-            is_valid = bcrypt.checkpw(
-                password.encode("utf-8"),
-                verify_user.password_hash.encode("utf-8"),
+        if not admin_user:
+            admin_user = User(
+                email=admin_email,
+                name="Admin User",
+                password_hash=password_hash,
+                is_admin=1,
             )
-            if is_valid:
-                print("Admin user ready: admin@corpay.com / Cadmin@1")
-            else:
-                print("WARNING: Admin user password verification failed")
+            db.add(admin_user)
+            db.commit()
+            print(f"Admin user created: {admin_email}")
         else:
-            print("WARNING: Admin user was not created")
+            changed = False
+            if not admin_user.is_admin:
+                admin_user.is_admin = 1
+                changed = True
+            if reset_password:
+                admin_user.password_hash = password_hash
+                changed = True
+            if changed:
+                db.commit()
+                print(f"Admin user updated: {admin_email}")
+            else:
+                print(f"Admin user already exists: {admin_email}")
 
     except Exception as e:
         print(f"ERROR: Could not initialize default admin user: {e}")
@@ -77,17 +87,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    # Start background task for LinkedIn sync
-    sync_task = asyncio.create_task(run_periodic_sync(interval_minutes=30))
-    
     yield
-    
-    # Cleanup on shutdown
-    sync_task.cancel()
-    try:
-        await sync_task
-    except asyncio.CancelledError:
-        pass
 
 
 app = FastAPI(
@@ -136,6 +136,7 @@ app.add_middleware(
 # Debug middleware for revenue upload to trace CORS/status behaviour
 @app.middleware("http")
 async def debug_revenue_upload_middleware(request, call_next):
+    debug_log_path = (os.getenv("APP_DEBUG_LOG_PATH") or "").strip()
     if request.url.path.startswith("/api/admin/revenue/upload-dev"):
         try:
             from datetime import datetime as _dt
@@ -153,8 +154,9 @@ async def debug_revenue_upload_middleware(request, call_next):
                 },
                 "timestamp": int(_dt.now().timestamp() * 1000),
             }
-            with open("/Users/madhujitharumugam/Desktop/latest_corpgit/corpay/.cursor/debug.log", "a") as f:
-                f.write(_json.dumps(payload) + "\n")
+            if debug_log_path:
+                with open(debug_log_path, "a", encoding="utf-8") as f:
+                    f.write(_json.dumps(payload) + "\n")
         except Exception:
             pass
 
@@ -175,8 +177,9 @@ async def debug_revenue_upload_middleware(request, call_next):
                 },
                 "timestamp": int(_dt.now().timestamp() * 1000),
             }
-            with open("/Users/madhujitharumugam/Desktop/latest_corpgit/corpay/.cursor/debug.log", "a") as f:
-                f.write(_json.dumps(payload) + "\n")
+            if debug_log_path:
+                with open(debug_log_path, "a", encoding="utf-8") as f:
+                    f.write(_json.dumps(payload) + "\n")
         except Exception:
             pass
 
@@ -193,7 +196,6 @@ app.include_router(employees.router)
 app.include_router(payments.router)
 app.include_router(system.router)
 app.include_router(config.router)
-app.include_router(linkedin_auth.router)
 app.include_router(slideshow.router)
 
 
@@ -205,4 +207,18 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/health/db")
+async def health_db_check():
+    """Railway-friendly DB health check endpoint with real query."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"status": "healthy", "database": "ok"}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"status": "unhealthy", "database": "down", "error": str(exc)},
+        )
 
