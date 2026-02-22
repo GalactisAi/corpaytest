@@ -28,7 +28,24 @@ from app.utils.file_handler import get_storage_public_url
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
-_API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8080")
+
+def _compute_api_base_url() -> str:
+    """
+    Resolve the public API base:
+    1) API_BASE_URL env when set
+    2) Railway public domain if present
+    3) localhost fallback
+    """
+    base_env = (os.getenv("API_BASE_URL") or "").strip()
+    if base_env:
+        return base_env.rstrip("/")
+    railway = (os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip()
+    if railway:
+        return f"https://{railway}"
+    return "http://localhost:8080"
+
+
+_API_BASE_URL = _compute_api_base_url()
 
 
 def _normalize_post_image_url(url: Optional[str]) -> Optional[str]:
