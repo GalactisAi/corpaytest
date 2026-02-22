@@ -21,11 +21,6 @@ export function RevenuePage() {
   const [lastMonth, setLastMonth] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   
-  // Share price manual entry state
-  const [manualSharePrice, setManualSharePrice] = useState('');
-  const [manualSharePriceChange, setManualSharePriceChange] = useState('');
-  const [isSavingSharePrice, setIsSavingSharePrice] = useState(false);
-  
   // Payments manual entry state
   const [paymentCardTitle, setPaymentCardTitle] = useState(
     localStorage.getItem('paymentCardTitle') || 'Customisable card 1'
@@ -619,70 +614,6 @@ export function RevenuePage() {
     }
   };
 
-  const handleSharePriceEntry = async () => {
-    if (!manualSharePrice || !manualSharePriceChange) {
-      toast.error('Please fill in all fields');
-      return;
-    }
-
-    setIsSavingSharePrice(true);
-    const sharePriceData = {
-      price: parseFloat(manualSharePrice),
-      change_percentage: parseFloat(manualSharePriceChange),
-    };
-
-    const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    try {
-      await axios.get(`${getOrigin()}/health`, { timeout: 120000 });
-    } catch (healthError: any) {
-      toast.error('Backend not reachable. Please ensure the backend server is running.');
-      setIsSavingSharePrice(false);
-      return;
-    }
-
-    try {
-      await api.post(
-        'admin/revenue/share-price/manual',
-        { price: sharePriceData.price, change_percentage: sharePriceData.change_percentage },
-        { headers, timeout: 120000 }
-      );
-
-      // Successfully saved to backend
-      localStorage.setItem('sharePriceData', JSON.stringify(sharePriceData));
-      window.dispatchEvent(new CustomEvent('sharePriceDataUpdated', {
-        detail: sharePriceData
-      }));
-      toast.success('Share price data saved successfully to backend');
-      setManualSharePrice('');
-      setManualSharePriceChange('');
-      setIsSavingSharePrice(false);
-      return;
-    } catch (apiError: any) {
-      console.error('Backend API error:', {
-        message: apiError.message,
-        code: apiError.code,
-        status: apiError.response?.status,
-        statusText: apiError.response?.statusText,
-        data: apiError.response?.data,
-      });
-
-      // Fallback to localStorage if API fails
-      localStorage.setItem('sharePriceData', JSON.stringify(sharePriceData));
-      window.dispatchEvent(new CustomEvent('sharePriceDataUpdated', {
-        detail: sharePriceData
-      }));
-      toast.warning('Backend API unavailable. Data saved locally. Please check backend connection.');
-      setManualSharePrice('');
-      setManualSharePriceChange('');
-      setIsSavingSharePrice(false);
-    }
-  };
-
   const handlePaymentEntry = async () => {
     if (!manualPaymentAmount || !manualPaymentTransactions) {
       toast.error('Please fill in all fields');
@@ -864,49 +795,6 @@ export function RevenuePage() {
                   className="w-full bg-pink-600 hover:bg-pink-700"
                 >
                   {isUploading ? 'Saving...' : 'Save Revenue Data'}
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* Manual Share Price Entry Card */}
-            <Card className="bg-white/10 border-white/20">
-              <CardHeader>
-                <CardTitle className="text-white">Manual Share Price Entry</CardTitle>
-                <CardDescription className="text-gray-400">
-                  Enter share price data manually for quick updates
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="sharePrice" className="text-white">Share Price</Label>
-                  <Input
-                    id="sharePrice"
-                    type="number"
-                    step="0.01"
-                    value={manualSharePrice}
-                    onChange={(e) => setManualSharePrice(e.target.value)}
-                    className="bg-white/10 border-white/20 text-white"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="sharePriceChange" className="text-white">% Change</Label>
-                  <Input
-                    id="sharePriceChange"
-                    type="number"
-                    step="0.01"
-                    value={manualSharePriceChange}
-                    onChange={(e) => setManualSharePriceChange(e.target.value)}
-                    className="bg-white/10 border-white/20 text-white"
-                  />
-                </div>
-
-                <Button 
-                  onClick={handleSharePriceEntry}
-                  disabled={isSavingSharePrice}
-                  className="w-full bg-pink-600 hover:bg-pink-700"
-                >
-                  {isSavingSharePrice ? 'Saving...' : 'Save Share Price Data'}
                 </Button>
               </CardContent>
             </Card>

@@ -106,27 +106,69 @@ except Exception as e:
     print(f"Warning: Could not mount static files: {e}")
 
 # CORS middleware: allow Railway/frontend origins; allow_methods=["*"] for OPTIONS preflight (avoids 400)
-_origins = list(settings.cors_origins)
-_extra = (os.getenv("CORS_ORIGINS_EXTRA") or "").strip()
-if _extra:
-    if _extra.startswith("["):
-        try:
-            _parsed = json.loads(_extra)
-            if isinstance(_parsed, list):
-                _origins.extend(str(o).strip() for o in _parsed if o and str(o).strip())
-            else:
-                _origins.extend(o.strip() for o in _extra.split(",") if o.strip())
-        except (json.JSONDecodeError, TypeError):
-            _origins.extend(o.strip() for o in _extra.split(",") if o.strip())
-    else:
-        _origins.extend(o.strip() for o in _extra.split(",") if o.strip())
-if os.getenv("RAILWAY_PUBLIC_DOMAIN"):
-    _railway_origin = f"https://{os.getenv('RAILWAY_PUBLIC_DOMAIN')}"
-    if _railway_origin not in _origins:
-        _origins.append(_railway_origin)
+def _normalize_origin(value: str | None) -> str | None:
+    """Return a trimmed origin string with protocol; None when empty."""
+    if not value:
+        return None
+    v = value.strip().rstrip("/")
+    if not v:
+        return None
+    if v.startswith(("http://", "https://")):
+        return v
+    # Assume https for bare domains such as foo.up.railway.app
+    return f"https://{v}"
+
+
+def _build_cors_origins() -> tuple[list[str], str | None]:
+    """Merge defaults, env extras, and Railway/Vercel domains."""
+    origins = {o for o in settings.cors_origins if o}
+
+    extra_raw = (os.getenv("CORS_ORIGINS_EXTRA") or "").strip()
+    if extra_raw:
+        if extra_raw.startswith("["):
+            try:
+                parsed = json.loads(extra_raw)
+                if isinstance(parsed, list):
+                    for item in parsed:
+                        origin = _normalize_origin(str(item) if item else None)
+                        if origin:
+                            origins.add(origin)
+                else:
+                    for part in extra_raw.split(","):
+                        origin = _normalize_origin(part)
+                        if origin:
+                            origins.add(origin)
+            except (json.JSONDecodeError, TypeError):
+                for part in extra_raw.split(","):
+                    origin = _normalize_origin(part)
+                    if origin:
+                        origins.add(origin)
+        else:
+            for part in extra_raw.split(","):
+                origin = _normalize_origin(part)
+                if origin:
+                    origins.add(origin)
+
+    for env_key in ("RAILWAY_PUBLIC_DOMAIN", "RAILWAY_STATIC_URL", "VERCEL_URL", "NEXT_PUBLIC_VERCEL_URL"):
+        origin = _normalize_origin(os.getenv(env_key))
+        if origin:
+            origins.add(origin)
+
+    # Optional escape hatch to trust all origins (useful for debugging misreported origins)
+    if _env_bool("CORS_ALLOW_ALL", default=False):
+        return [], ".*"
+
+    # Allow any *.up.railway.app origin by default to cover preview/prod domains
+    allow_regex = os.getenv("CORS_ALLOW_ORIGIN_REGEX") or r"https://.*\.up\.railway\.app"
+    return list(origins), allow_regex
+
+
+_cors_allow_origins, _cors_allow_regex = _build_cors_origins()
+print(f"[CORS] allow_origins={_cors_allow_origins} allow_origin_regex={_cors_allow_regex}")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_origins,
+    allow_origins=_cors_allow_origins,
+    allow_origin_regex=_cors_allow_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

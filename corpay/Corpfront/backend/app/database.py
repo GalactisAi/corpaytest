@@ -9,16 +9,20 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, Query
 from typing import Generator, Any
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+from time import perf_counter
+import logging
 
 from app.config import settings
+
+logger = logging.getLogger("db.timing")
 
 # DATABASE_URL is loaded from environment (config.py loads .env and Settings.database_url)
 # Also check DATABASE env var (Railway uses this name)
 import os as _os
 DATABASE_URL = (settings.database_url or "").strip() or _os.getenv("DATABASE_URL", "") or _os.getenv("DATABASE", "") or "sqlite:///./dashboard.db"
 
-# Retry settings for transient SSL/connection drops (Supabase free tier)
-_MAX_DB_RETRIES = 3  # max 3 retries = 4 total attempts
+# Retry settings for transient SSL/connection drops (tunable via env, e.g., DB_MAX_RETRIES=3 for Pro)
+_MAX_DB_RETRIES = int(_os.getenv("DB_MAX_RETRIES", "3") or 3)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -58,10 +62,12 @@ def _pg_engine(url: str):
     if url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
     url = _ensure_sslmode_require(url)
-    pool_size = _env_int("DB_POOL_SIZE", 15)
-    max_overflow = _env_int("DB_MAX_OVERFLOW", 20)
-    pool_timeout = _env_int("DB_POOL_TIMEOUT", 20)
-    pool_recycle = _env_int("DB_POOL_RECYCLE", 1800)
+    # Pro-tier defaults; override via env DB_POOL_SIZE / DB_MAX_OVERFLOW / DB_POOL_TIMEOUT / DB_POOL_RECYCLE
+    pool_size = _env_int("DB_POOL_SIZE", 20)
+    max_overflow = _env_int("DB_MAX_OVERFLOW", 40)
+    pool_timeout = _env_int("DB_POOL_TIMEOUT", 45)
+    # Recycle frequently to proactively refresh SSL connections during the 9–5 window
+    pool_recycle = _env_int("DB_POOL_RECYCLE", 240)  # seconds
     return create_engine(
         url,
         pool_size=pool_size,
@@ -142,7 +148,13 @@ class _RetryingQuery:
         for attempt in range(_MAX_DB_RETRIES + 1):
             try:
                 q = self._build_query()
-                return getattr(q, fn_name)(*args, **kwargs)
+                stmt = getattr(q, "statement", None)
+                should_time = _is_select_statement(stmt)
+                start = perf_counter() if should_time else None
+                result = getattr(q, fn_name)(*args, **kwargs)
+                if should_time and start is not None:
+                    _log_query_timing(stmt or q, perf_counter() - start, attempt)
+                return result
             except Exception as e:
                 if not _is_retryable(e) or attempt == _MAX_DB_RETRIES:
                     raise
@@ -236,6 +248,36 @@ class _RetryingQuery:
         return getattr(self._build_query(), name)
 
 
+def _is_select_statement(stmt) -> bool:
+    """Best-effort check to log only SELECT/read queries."""
+    try:
+        if bool(getattr(stmt, "is_select", False)):
+            return True
+        sql = str(stmt).lstrip().lower()
+        return sql.startswith("select")
+    except Exception:
+        return False
+
+
+def _log_query_timing(stmt, duration_seconds: float, attempt: int) -> None:
+    """
+    Emit a concise log for query duration. Avoid huge logs by truncating SQL text.
+    attempt is 0-indexed from the retry loop.
+    """
+    try:
+        sql = str(stmt).strip().replace("\n", " ")
+        if len(sql) > 500:
+            sql = sql[:500] + "..."
+    except Exception:
+        sql = "<unserializable statement>"
+    logger.info(
+        "[DB] select completed in %.2f ms (attempt %d) sql=%s",
+        duration_seconds * 1000.0,
+        attempt + 1,
+        sql,
+    )
+
+
 class _RetryingSession:
     """
     Wraps a Session and retries execute/commit on OperationalError/PendingRollbackError
@@ -248,8 +290,14 @@ class _RetryingSession:
     def _retry(self, fn, *args, **kwargs):
         last_exc = None
         for attempt in range(_MAX_DB_RETRIES + 1):
+            stmt = args[0] if args else kwargs.get("statement")
+            should_time = fn is self._session.execute and _is_select_statement(stmt)
+            start = perf_counter() if should_time else None
             try:
-                return fn(*args, **kwargs)
+                result = fn(*args, **kwargs)
+                if should_time and start is not None:
+                    _log_query_timing(stmt, perf_counter() - start, attempt)
+                return result
             except Exception as e:
                 if not _is_retryable(e) or attempt == _MAX_DB_RETRIES:
                     raise

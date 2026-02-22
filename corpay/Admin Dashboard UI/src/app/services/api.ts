@@ -9,6 +9,17 @@ function normalizeBase(raw?: string | null): string | null {
   return trimmed || null;
 }
 
+function productionFallbackBase(isBrowser: boolean): string | null {
+  // If no VITE_API_URL is set and we are on the Vercel admin domain, point to the Railway backend.
+  if (isBrowser && typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host.includes('finaltryadmin.vercel.app')) {
+      return 'https://finaltry-production-0eb2.up.railway.app';
+    }
+  }
+  return null;
+}
+
 /**
  * Build an API base URL that avoids common production pitfalls:
  * - Avoid mixed content on HTTPS (auto-upgrade http:// to https:// when possible)
@@ -38,8 +49,8 @@ export function getBaseURL(): string {
   }
 
   if (!base) {
-    // No env provided: default to current origin (or /api for SSR/CI)
-    base = isBrowser && window.location.origin ? window.location.origin : '/api';
+    // No env provided: try a production fallback, then current origin, else /api
+    base = productionFallbackBase(isBrowser) || (isBrowser && window.location.origin ? window.location.origin : '/api');
   }
 
   const finalBase = String(base).replace(/\/+$/, '');
@@ -96,7 +107,7 @@ export function getOrigin(): string {
   }
 
   if (!origin) {
-    origin = isBrowser && window.location.origin ? window.location.origin : '';
+    origin = productionFallbackBase(isBrowser) || (isBrowser && window.location.origin ? window.location.origin : '');
   }
 
   return String(origin).replace(/\/+$/, '');
