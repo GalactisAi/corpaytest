@@ -8,6 +8,7 @@ from app.database import get_db, SessionLocal
 from app.models.revenue import Revenue, RevenueTrend, RevenueProportion, SharePrice
 from app.models.posts import SocialPost
 from app.models.employees import EmployeeMilestone
+from app.models.file_upload import FileUpload, FileType
 from app.models.payments import PaymentData
 from app.models.system_performance import SystemPerformance
 from app.models.api_config import ApiConfig
@@ -66,6 +67,24 @@ def _normalize_avatar_url(path: Optional[str]) -> Optional[str]:
     if path.startswith("http://") or path.startswith("https://"):
         return path
     return get_storage_public_url(path, _API_BASE_URL)
+
+
+def _resolve_avatar_url(db: Session, stored_path: Optional[str]) -> Optional[str]:
+    """
+    Resolve stored avatar path to a public URL by checking FileUpload for storage_url.
+    Falls back to get_storage_public_url when no upload record is found.
+    """
+    if not stored_path:
+        return stored_path
+    upload = (
+        db.query(FileUpload)
+        .filter(FileUpload.file_type == FileType.EMPLOYEE_PHOTO, FileUpload.stored_path == stored_path)
+        .order_by(FileUpload.created_at.desc())
+        .first()
+    )
+    if upload and upload.storage_url:
+        return upload.storage_url
+    return get_storage_public_url(stored_path, _API_BASE_URL)
 
 
 @router.get("/revenue", response_model=RevenueResponse)
@@ -407,7 +426,8 @@ async def get_employee_milestones(limit: int = 20, db: Session = Depends(get_db)
             .all()
         )
         for m in milestones:
-            m.avatar_path = _normalize_avatar_url(getattr(m, "avatar_path", None))
+            stored = getattr(m, "avatar_path", None)
+            m.avatar_path = _resolve_avatar_url(db, stored) if stored else None
         return milestones
     except Exception as e:
         import logging
@@ -420,7 +440,8 @@ async def get_employee_milestones(limit: int = 20, db: Session = Depends(get_db)
                 .all()
             )
             for m in milestones:
-                m.avatar_path = _normalize_avatar_url(getattr(m, "avatar_path", None))
+                stored = getattr(m, "avatar_path", None)
+                m.avatar_path = _resolve_avatar_url(db, stored) if stored else None
             return milestones
         except Exception as e2:
             logging.getLogger(__name__).exception("get_employee_milestones fallback failed: %s", e2)

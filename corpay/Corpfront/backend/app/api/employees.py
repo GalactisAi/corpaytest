@@ -205,7 +205,8 @@ async def upload_employee_photo_dev(
         if employee_id > 0:
             milestone = db.query(EmployeeMilestone).filter(EmployeeMilestone.id == employee_id).first()
             if milestone:
-                milestone.avatar_path = stored_path
+                # Store the public URL so clients don't need to resolve stored_path
+                milestone.avatar_path = storage_url or stored_path
 
         db.commit()
         return {"message": "Photo uploaded successfully", "avatar_path": storage_url, "stored_path": stored_path}
@@ -254,7 +255,8 @@ async def upload_employee_photo(
             milestone = db.query(EmployeeMilestone).filter(EmployeeMilestone.id == employee_id).first()
             if not milestone:
                 raise HTTPException(status_code=404, detail="Employee milestone not found")
-            milestone.avatar_path = stored_path
+            # Store the public URL so clients don't need to resolve stored_path
+            milestone.avatar_path = storage_url or stored_path
 
         db.commit()
         return {"message": "Photo uploaded successfully", "avatar_path": storage_url, "stored_path": stored_path}
