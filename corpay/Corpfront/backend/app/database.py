@@ -121,19 +121,28 @@ Base = declarative_base()
 
 class _RetryingQuery:
     """
-    Wraps a Query and applies retry (rollback + expire_all) on terminal methods
-    so that SQLAlchemy's internal execute() uses a real Session and retries work.
+    Rebuilds the query from scratch on each retry so a broken connection never
+    poisons the Query object. Stores (session, entities, ops) and rebuilds via
+    _build_query() before every terminal call.
     """
 
-    def __init__(self, query: Query, session: Session):
-        self._query = query
+    def __init__(self, session: Session, entities: tuple, ops: list | None = None):
         self._session = session
+        self._entities = entities
+        self._ops = ops or []
 
-    def _retry_terminal(self, fn, *args, **kwargs):
+    def _build_query(self) -> Query:
+        q = self._session.query(*self._entities)
+        for method_name, args, kwargs in self._ops:
+            q = getattr(q, method_name)(*args, **kwargs)
+        return q
+
+    def _retry_terminal(self, fn_name: str, *args, **kwargs):
         last_exc = None
         for attempt in range(_MAX_DB_RETRIES + 1):
             try:
-                return fn(*args, **kwargs)
+                q = self._build_query()
+                return getattr(q, fn_name)(*args, **kwargs)
             except Exception as e:
                 if not _is_retryable(e) or attempt == _MAX_DB_RETRIES:
                     raise
@@ -143,75 +152,88 @@ class _RetryingQuery:
                     self._session.expire_all()
                 except Exception:
                     pass
-        if last_exc is not None:
-            raise last_exc
+        raise last_exc
 
+    def _chain(self, method_name: str, *args, **kwargs) -> "_RetryingQuery":
+        return _RetryingQuery(
+            self._session,
+            self._entities,
+            self._ops + [(method_name, args, kwargs)],
+        )
+
+    # Terminal methods
     def first(self):
-        return self._retry_terminal(self._query.first)
+        return self._retry_terminal("first")
 
     def all(self):
-        return self._retry_terminal(self._query.all)
+        return self._retry_terminal("all")
 
     def one(self):
-        return self._retry_terminal(self._query.one)
+        return self._retry_terminal("one")
 
     def one_or_none(self):
-        return self._retry_terminal(self._query.one_or_none)
+        return self._retry_terminal("one_or_none")
 
     def count(self):
-        return self._retry_terminal(self._query.count)
+        return self._retry_terminal("count")
 
     def scalar(self):
-        return self._retry_terminal(self._query.scalar)
+        return self._retry_terminal("scalar")
+
+    def delete(self, synchronize_session="evaluate"):
+        return self._retry_terminal("delete", synchronize_session=synchronize_session)
+
+    def update(self, values, synchronize_session="evaluate"):
+        return self._retry_terminal("update", values, synchronize_session=synchronize_session)
 
     def __iter__(self):
-        return self._retry_terminal(lambda: iter(self._query))
+        return iter(self._retry_terminal("all"))
 
-    def delete(self):
-        def _do_delete():
-            return self._session.execute(self._query.delete())
+    # Chaining methods
+    def filter(self, *a, **kw):
+        return self._chain("filter", *a, **kw)
 
-        return self._retry_terminal(_do_delete)
+    def filter_by(self, **kw):
+        return self._chain("filter_by", **kw)
 
-    # Chaining methods: return new _RetryingQuery
-    def filter(self, *args, **kwargs):
-        return _RetryingQuery(self._query.filter(*args, **kwargs), self._session)
+    def order_by(self, *a, **kw):
+        return self._chain("order_by", *a, **kw)
 
-    def filter_by(self, **kwargs):
-        return _RetryingQuery(self._query.filter_by(**kwargs), self._session)
+    def limit(self, *a, **kw):
+        return self._chain("limit", *a, **kw)
 
-    def order_by(self, *args, **kwargs):
-        return _RetryingQuery(self._query.order_by(*args, **kwargs), self._session)
+    def offset(self, *a, **kw):
+        return self._chain("offset", *a, **kw)
 
-    def limit(self, *args, **kwargs):
-        return _RetryingQuery(self._query.limit(*args, **kwargs), self._session)
+    def join(self, *a, **kw):
+        return self._chain("join", *a, **kw)
 
-    def offset(self, *args, **kwargs):
-        return _RetryingQuery(self._query.offset(*args, **kwargs), self._session)
+    def outerjoin(self, *a, **kw):
+        return self._chain("outerjoin", *a, **kw)
 
-    def join(self, *args, **kwargs):
-        return _RetryingQuery(self._query.join(*args, **kwargs), self._session)
+    def with_entities(self, *a, **kw):
+        return self._chain("with_entities", *a, **kw)
 
-    def outerjoin(self, *args, **kwargs):
-        return _RetryingQuery(self._query.outerjoin(*args, **kwargs), self._session)
+    def distinct(self, *a, **kw):
+        return self._chain("distinct", *a, **kw)
 
-    def with_entities(self, *args, **kwargs):
-        return _RetryingQuery(self._query.with_entities(*args, **kwargs), self._session)
+    def group_by(self, *a, **kw):
+        return self._chain("group_by", *a, **kw)
 
-    def distinct(self, *args, **kwargs):
-        return _RetryingQuery(self._query.distinct(*args, **kwargs), self._session)
+    def having(self, *a, **kw):
+        return self._chain("having", *a, **kw)
 
-    def group_by(self, *args, **kwargs):
-        return _RetryingQuery(self._query.group_by(*args, **kwargs), self._session)
+    def options(self, *a, **kw):
+        return self._chain("options", *a, **kw)
 
-    def having(self, *args, **kwargs):
-        return _RetryingQuery(self._query.having(*args, **kwargs), self._session)
+    def subquery(self, *a, **kw):
+        return self._build_query().subquery(*a, **kw)
 
-    def options(self, *args, **kwargs):
-        return _RetryingQuery(self._query.options(*args, **kwargs), self._session)
+    def with_labels(self, *a, **kw):
+        return self._chain("with_labels", *a, **kw)
 
     def __getattr__(self, name: str):
-        return getattr(self._query, name)
+        return getattr(self._build_query(), name)
 
 
 class _RetryingSession:
@@ -247,7 +269,7 @@ class _RetryingSession:
         return self._retry(self._session.commit)
 
     def query(self, *args, **kwargs) -> _RetryingQuery:
-        return _RetryingQuery(self._session.query(*args, **kwargs), self._session)
+        return _RetryingQuery(self._session, args)
 
     # Delegated methods (no retry; caller can use execute/commit for retry when needed)
     def add(self, *args, **kwargs):
