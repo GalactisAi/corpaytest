@@ -103,9 +103,25 @@ def save_uploaded_file_local(
 
 def get_storage_public_url(relative_path: str, api_base: str = "") -> str:
     """
-    Return the public URL for a stored file. When Supabase is configured, returns Supabase public URL;
-    otherwise returns api_base + /uploads/ + path.
+    Return the public URL for a stored file.
+    Priority:
+    1) If the file exists locally (including local fallback), serve from API uploads to avoid broken Supabase URLs.
+    2) If Supabase is configured, return Supabase public URL.
+    3) Else return api_base + /uploads/ + path.
     """
+    if relative_path.startswith("http://") or relative_path.startswith("https://"):
+        return relative_path
+
+    # If the file exists locally (e.g., Supabase upload failed and we fell back), use local uploads URL.
+    try:
+        upload_dir = Path(settings.upload_dir)
+        full_path = upload_dir / relative_path
+        if full_path.exists():
+            base = (api_base or "").rstrip("/")
+            return f"{base}/uploads/{relative_path.lstrip('/')}" if base else f"/uploads/{relative_path.lstrip('/')}"
+    except Exception:
+        pass
+
     if (settings.supabase_url or "").strip() and (settings.supabase_service_key or "").strip():
         base = (settings.supabase_url or "").strip().rstrip("/")
         bucket = (settings.supabase_uploads_bucket or "uploads").strip() or "uploads"
