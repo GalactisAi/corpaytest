@@ -1,24 +1,58 @@
 import axios from 'axios';
 
 /**
- * Base URL with /api exactly once: ${VITE_API_URL}/api (or '/api' when no env).
- * All API request paths must be relative to this (e.g. 'admin/auth/login', 'dashboard/revenue').
- * Do NOT use paths starting with /api (would double to .../api/api/...).
+ * Normalize the provided base (trim, drop trailing slashes). Returns null when empty.
+ */
+function normalizeBase(raw?: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = String(raw).trim().replace(/\/+$/, '');
+  return trimmed || null;
+}
+
+/**
+ * Build an API base URL that avoids common production pitfalls:
+ * - Avoid mixed content on HTTPS (auto-upgrade http:// to https:// when possible)
+ * - Avoid shipping localhost/127.0.0.1 in production (fallback to window.origin)
+ * - Ensure /api is appended exactly once
  */
 export function getBaseURL(): string {
-  const base = import.meta.env.VITE_API_URL;
-  if (base != null && String(base).trim() !== '') {
-    const trimmed = String(base).replace(/\/+$/, '');
-    return trimmed ? `${trimmed}/api` : '/api';
+  const envBase = normalizeBase(import.meta.env.VITE_API_URL);
+  const isBrowser = typeof window !== 'undefined';
+
+  let base = envBase;
+
+  if (envBase && isBrowser) {
+    const isLocalEnv = /^(https?:\/\/)?(localhost|127\.0\.0\.1)([:/]|$)/i.test(envBase);
+    const isHttpsPage = window.location.protocol === 'https:';
+    const currentHostIsLocal = /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
+
+    // If env points to localhost but app is running on a real domain, use current origin instead.
+    if (isLocalEnv && !currentHostIsLocal && window.location.origin) {
+      base = window.location.origin;
+    }
+
+    // Auto-upgrade to https to avoid mixed-content blocks on production domains.
+    if (base?.startsWith('http://') && isHttpsPage) {
+      base = `https://${base.replace(/^http:\/\//i, '')}`;
+    }
   }
-  return '/api';
+
+  if (!base) {
+    // No env provided: default to current origin (or /api for SSR/CI)
+    base = isBrowser && window.location.origin ? window.location.origin : '/api';
+  }
+
+  const finalBase = String(base).replace(/\/+$/, '');
+  if (!finalBase) return '/api';
+  const hasApiSuffix = /\/api$/i.test(finalBase);
+  return hasApiSuffix ? finalBase : `${finalBase}/api`;
 }
 
 /** Alias for login and other services: base for POST/GET (e.g. .../api). */
 export const apiBaseURL = getBaseURL();
 
 export const api = axios.create({
-  baseURL: getBaseURL(),
+  baseURL: apiBaseURL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -37,11 +71,35 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-/** Origin only (no /api) for routes like /health mounted at root. Uses VITE_API_URL when set. */
+/**
+ * Origin (no /api) for endpoints like /health.
+ * Mirrors the base URL normalization to avoid localhost/mixed-content issues.
+ */
 export function getOrigin(): string {
-  const base = import.meta.env.VITE_API_URL;
-  if (base != null && String(base).trim() !== '') return String(base).replace(/\/+$/, '');
-  return typeof window !== 'undefined' ? window.location.origin : '';
+  const envBase = normalizeBase(import.meta.env.VITE_API_URL);
+  const isBrowser = typeof window !== 'undefined';
+
+  let origin = envBase;
+
+  if (envBase && isBrowser) {
+    const isLocalEnv = /^(https?:\/\/)?(localhost|127\.0\.0\.1)([:/]|$)/i.test(envBase);
+    const isHttpsPage = window.location.protocol === 'https:';
+    const currentHostIsLocal = /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
+
+    if (isLocalEnv && !currentHostIsLocal && window.location.origin) {
+      origin = window.location.origin;
+    }
+
+    if (origin?.startsWith('http://') && isHttpsPage) {
+      origin = `https://${origin.replace(/^http:\/\//i, '')}`;
+    }
+  }
+
+  if (!origin) {
+    origin = isBrowser && window.location.origin ? window.location.origin : '';
+  }
+
+  return String(origin).replace(/\/+$/, '');
 }
 
 // Request path should NOT start with / so we get baseURL + '/' + path (e.g. /api/admin/auth/login)
