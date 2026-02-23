@@ -102,17 +102,16 @@ def save_uploaded_file_local(
 
 
 def get_storage_public_url(relative_path: str, api_base: str = "") -> str:
-    """
-    Return the public URL for a stored file.
-    Priority:
-    1) If the file exists locally (including local fallback), serve from API uploads to avoid broken Supabase URLs.
-    2) If Supabase is configured, return Supabase public URL.
-    3) Else return api_base + /uploads/ + path.
-    """
     if relative_path.startswith("http://") or relative_path.startswith("https://"):
         return relative_path
 
-    # If the file exists locally (e.g., Supabase upload failed and we fell back), use local uploads URL.
+    # If Supabase is configured, always use Supabase URL
+    supabase_base = (settings.supabase_url or "").strip().rstrip("/")
+    if supabase_base:
+        bucket = (settings.supabase_uploads_bucket or "uploads").strip() or "uploads"
+        return f"{supabase_base}/storage/v1/object/public/{bucket}/{relative_path}"
+
+    # Local fallback only when Supabase not configured
     try:
         upload_dir = Path(settings.upload_dir)
         full_path = upload_dir / relative_path
@@ -122,10 +121,6 @@ def get_storage_public_url(relative_path: str, api_base: str = "") -> str:
     except Exception:
         pass
 
-    supabase_base = (settings.supabase_url or "").strip().rstrip("/")
-    if supabase_base:
-        bucket = (settings.supabase_uploads_bucket or "uploads").strip() or "uploads"
-        return f"{supabase_base}/storage/v1/object/public/{bucket}/{relative_path}"
     base = (api_base or "").rstrip("/")
     return f"{base}/uploads/{relative_path.lstrip('/')}" if base else f"/uploads/{relative_path.lstrip('/')}"
 
