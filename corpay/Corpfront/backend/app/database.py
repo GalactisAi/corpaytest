@@ -185,6 +185,10 @@ class _RetryingQuery:
                     self._session.expire_all()
                 except Exception:
                     pass
+                try:
+                    engine.dispose()
+                except Exception:
+                    pass
         raise last_exc
 
     def _chain(self, method_name: str, *args, **kwargs) -> "_RetryingQuery":
@@ -326,6 +330,10 @@ class _RetryingSession:
                 try:
                     self._session.rollback()
                     self._session.expire_all()
+                except Exception:
+                    pass
+                try:
+                    engine.dispose()
                 except Exception:
                     pass
         if last_exc is not None:
