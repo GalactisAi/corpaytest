@@ -26,6 +26,7 @@ from pptx import Presentation
 from io import BytesIO
 from PIL import Image
 import io
+import httpx
 
 router = APIRouter(prefix="/api", tags=["slideshow"])
 
@@ -538,21 +539,27 @@ async def get_slide_images(db: Session = Depends(get_db)):
                 detail="PDF support requires the pymupdf package. Install with: pip install pymupdf",
             )
         try:
-            # Cache: return existing slides if same file (path + mtime) was already converted
+            # Cache: return existing slide URLs if same file (path + mtime) was already converted
             meta_path = slides_dir / f"{base_name}.pdf.meta"
+            file_path_key = str(full_file_path.resolve())
             file_mtime = str(full_file_path.stat().st_mtime)
-            file_key = f"{full_file_path.resolve()}\n{file_mtime}"
+            supabase_base = (settings.supabase_url or "").strip().rstrip("/")
+            supabase_key = (settings.supabase_service_key or "").strip()
+            bucket = (settings.supabase_uploads_bucket or "uploads").strip() or "uploads"
+            use_supabase = bool(supabase_base and supabase_key)
+
             if meta_path.exists():
                 try:
                     with open(meta_path, "r") as f:
-                        if f.read().strip() == file_key:
-                            cached = sorted(slides_dir.glob(f"{base_name}_*.png"), key=lambda p: int(p.stem.rsplit("_", 1)[-1]))
-                            if cached:
-                                slide_images = [f"{API_BASE_URL}/uploads/slideshow/slides/{p.name}" for p in cached]
-                                print(f"[Slideshow] PDF serving {len(slide_images)} cached slides")
-                                return {"slides": slide_images, "use_viewer": False}
+                        meta_lines = [line.strip() for line in f.read().splitlines()]
+                    if len(meta_lines) >= 2 and meta_lines[0] == file_path_key and meta_lines[1] == file_mtime:
+                        cached_urls = [line for line in meta_lines[2:] if line]
+                        if cached_urls:
+                            print(f"[Slideshow] PDF serving {len(cached_urls)} cached slides")
+                            return {"slides": cached_urls, "use_viewer": False}
                 except (ValueError, OSError):
                     pass
+
             for old in slides_dir.glob(f"{base_name}*.png"):
                 try:
                     old.unlink()
@@ -563,21 +570,46 @@ async def get_slide_images(db: Session = Depends(get_db)):
                     old.unlink()
                 except OSError:
                     pass
+
             # 1.5x scale for faster conversion (was 2.0)
             PDF_SCALE = 1.5
             doc = fitz.open(str(full_file_path))
             slide_images = []
-            for i in range(len(doc)):
-                page = doc[i]
-                mat = fitz.Matrix(PDF_SCALE, PDF_SCALE)
-                pix = page.get_pixmap(matrix=mat, alpha=False)
-                out_path = slides_dir / f"{base_name}_{i + 1}.png"
-                pix.save(str(out_path))
-                slide_images.append(f"{API_BASE_URL}/uploads/slideshow/slides/{out_path.name}")
+
+            if use_supabase:
+                with httpx.Client(timeout=60.0) as client:
+                    for i in range(len(doc)):
+                        page = doc[i]
+                        mat = fitz.Matrix(PDF_SCALE, PDF_SCALE)
+                        pix = page.get_pixmap(matrix=mat, alpha=False)
+                        slide_name = f"{base_name}_{i + 1}.png"
+                        object_path = f"slideshow/slides/{slide_name}"
+                        upload_url = f"{supabase_base}/storage/v1/object/{bucket}/{object_path}"
+                        headers = {
+                            "Authorization": f"Bearer {supabase_key}",
+                            "Content-Type": "image/png",
+                            "x-upsert": "true",
+                        }
+                        resp = client.post(upload_url, content=pix.tobytes("png"), headers=headers)
+                        resp.raise_for_status()
+                        slide_images.append(
+                            f"{supabase_base}/storage/v1/object/public/{bucket}/{object_path}"
+                        )
+            else:
+                for i in range(len(doc)):
+                    page = doc[i]
+                    mat = fitz.Matrix(PDF_SCALE, PDF_SCALE)
+                    pix = page.get_pixmap(matrix=mat, alpha=False)
+                    out_path = slides_dir / f"{base_name}_{i + 1}.png"
+                    pix.save(str(out_path))
+                    slide_images.append(f"{API_BASE_URL}/uploads/slideshow/slides/{out_path.name}")
+
             doc.close()
             if slide_images:
                 with open(meta_path, "w") as f:
-                    f.write(file_key)
+                    f.write(file_path_key + "\n")
+                    f.write(file_mtime + "\n")
+                    f.write("\n".join(slide_images))
                 print(f"[Slideshow] PDF converted to {len(slide_images)} slides")
                 return {"slides": slide_images, "use_viewer": False}
             raise HTTPException(status_code=500, detail="PDF has no pages")
