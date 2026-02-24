@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple
 from datetime import datetime, timezone, date, timedelta
 from urllib.parse import urljoin
 import os
-from app.database import get_db, SessionLocal, engine
+from app.database import get_db, SessionLocal, engine, _RetryingSession
 from app.models.revenue import Revenue, RevenueTrend, RevenueProportion, SharePrice
 from app.models.posts import SocialPost
 from app.models.employees import EmployeeMilestone
@@ -144,7 +144,8 @@ def _prune_share_prices(db: Session, keep: int = 5) -> None:
 
 def _purge_old_share_prices(max_age_seconds: int) -> None:
     """Remove scraped rows older than max_age_seconds and delete all manual rows."""
-    db = SessionLocal()
+    raw_db = SessionLocal()
+    db = _RetryingSession(raw_db)
     try:
         db.query(SharePrice).filter(SharePrice.api_source == "manual").delete()
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
@@ -167,7 +168,8 @@ def _get_last_share_price_read_only() -> Tuple[Optional[SharePrice], bool]:
     """
     last_exc = None
     for attempt in range(3):
-        db = SessionLocal()
+        raw_db = SessionLocal()
+        db = _RetryingSession(raw_db)
         try:
             last_scraped = (
                 db.query(SharePrice)
@@ -206,7 +208,8 @@ def _return_last_share_price_or_fallback() -> SharePriceResponse:
     """
     last_exc = None
     for attempt in range(3):
-        db = SessionLocal()
+        raw_db = SessionLocal()
+        db = _RetryingSession(raw_db)
         try:
             last_row = (
                 db.query(SharePrice)
@@ -266,7 +269,8 @@ async def get_share_price():
             return SharePriceResponse.model_validate(last_row)
         if should_scrape:
             api_data = await SharePriceService.get_share_price(use_cache=False)
-            db = SessionLocal()
+            raw_db = SessionLocal()
+            db = _RetryingSession(raw_db)
             try:
                 # Remove existing non-manual rows so we always return the freshest scrape
                 db.query(SharePrice).filter(SharePrice.api_source != "manual").delete()
