@@ -1,10 +1,15 @@
+import logging
+import os
+from datetime import datetime, timezone, date, timedelta
+from typing import List, Optional, Tuple
+from urllib.parse import urljoin
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
-from typing import List, Optional, Tuple
-from datetime import datetime, timezone, date, timedelta
-from urllib.parse import urljoin
-import os
+
+logger = logging.getLogger(__name__)
+
 from app.database import get_db, SessionLocal, engine, _RetryingSession
 from app.models.revenue import Revenue, RevenueTrend, RevenueProportion, SharePrice
 from app.models.posts import SocialPost
@@ -260,7 +265,7 @@ async def get_share_price():
             _purge_old_share_prices(max_age)
         except Exception as e:
             if isinstance(e, OperationalError) or "ssl" in str(e).lower():
-                pass
+                logger.warning("SSL error during share price purge: %s", e)
             else:
                 raise
 
@@ -421,8 +426,6 @@ async def get_corpay_posts(limit: int = 10, db: Session = Depends(get_db)):
             for p in db_posts
         ]
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.error(f"Error fetching Corpay posts: {e}")
         import traceback
         logger.error(traceback.format_exc())
@@ -446,8 +449,6 @@ async def get_cross_border_posts(limit: int = 10, db: Session = Depends(get_db))
             for p in db_posts
         ]
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.error(f"Error fetching Cross-Border posts: {e}")
         import traceback
         logger.error(traceback.format_exc())
@@ -475,7 +476,6 @@ async def get_employee_milestones(limit: int = 20, db: Session = Depends(get_db)
             m.avatar_path = _resolve_avatar_url(db, stored) if stored else None
         return milestones
     except Exception as e:
-        import logging
         logging.getLogger(__name__).exception("get_employee_milestones failed: %s", e)
         try:
             milestones = (

@@ -70,7 +70,7 @@ def _pg_engine(url: str):
     max_overflow = _env_int("DB_MAX_OVERFLOW", 40)
     pool_timeout = _env_int("DB_POOL_TIMEOUT", 45)
     # Recycle frequently to proactively refresh SSL connections during the 9–5 window
-    pool_recycle = _env_int("DB_POOL_RECYCLE", 240)  # seconds
+    pool_recycle = _env_int("DB_POOL_RECYCLE", 180)  # seconds
 
     connect_args = {
         "sslmode": "require",
@@ -135,6 +135,11 @@ if DATABASE_URL.startswith("postgresql"):
             conn = getattr(ctx, "connection", None)
             if conn is not None:
                 conn.invalidate()
+            else:
+                try:
+                    engine.dispose()
+                except Exception:
+                    pass
 
     event.listen(engine, "handle_error", _invalidate_on_connection_error)
 else:
@@ -182,7 +187,14 @@ class _RetryingQuery:
                 last_exc = e
                 try:
                     self._session.rollback()
+                except Exception:
+                    pass
+                try:
                     self._session.expire_all()
+                except Exception:
+                    pass
+                try:
+                    self._session.close()
                 except Exception:
                     pass
                 try:
@@ -329,7 +341,14 @@ class _RetryingSession:
                 last_exc = e
                 try:
                     self._session.rollback()
+                except Exception:
+                    pass
+                try:
                     self._session.expire_all()
+                except Exception:
+                    pass
+                try:
+                    self._session.close()
                 except Exception:
                     pass
                 try:
