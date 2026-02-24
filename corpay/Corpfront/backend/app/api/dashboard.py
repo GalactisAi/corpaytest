@@ -136,7 +136,7 @@ def _prune_share_prices(db: Session, keep: int = 5) -> None:
             .filter(SharePrice.api_source != "manual")
             .order_by(SharePrice.timestamp.desc())
             .limit(keep)
-            .subquery()
+            .scalar_subquery()
         )
         db.query(SharePrice).filter(
             SharePrice.api_source != "manual",

@@ -6,6 +6,8 @@ Tuned for Supabase Pro: larger pool and overflow to avoid QueuePool limit errors
 import base64
 import logging
 import tempfile
+import threading
+import time
 from time import perf_counter
 from typing import Any, Generator
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
@@ -25,7 +27,7 @@ import os as _os
 DATABASE_URL = (settings.database_url or "").strip() or _os.getenv("DATABASE_URL", "") or _os.getenv("DATABASE", "") or "sqlite:///./dashboard.db"
 
 # Retry settings for transient SSL/connection drops (tunable via env, e.g., DB_MAX_RETRIES=3 for Pro)
-_MAX_DB_RETRIES = int(_os.getenv("DB_MAX_RETRIES", "3") or 3)
+_MAX_DB_RETRIES = int(_os.getenv("DB_MAX_RETRIES", "5") or 5)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -65,16 +67,18 @@ def _pg_engine(url: str):
     if url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
     url = _ensure_sslmode_require(url)
-    # Pro-tier defaults; override via env DB_POOL_SIZE / DB_MAX_OVERFLOW / DB_POOL_TIMEOUT / DB_POOL_RECYCLE
-    pool_size = _env_int("DB_POOL_SIZE", 20)
-    max_overflow = _env_int("DB_MAX_OVERFLOW", 40)
+    # Small pool: fewer dead connections to recycle after long idle periods.
+    # Override via env DB_POOL_SIZE / DB_MAX_OVERFLOW / DB_POOL_TIMEOUT / DB_POOL_RECYCLE
+    pool_size = _env_int("DB_POOL_SIZE", 5)
+    max_overflow = _env_int("DB_MAX_OVERFLOW", 10)
     pool_timeout = _env_int("DB_POOL_TIMEOUT", 45)
-    # Recycle frequently to proactively refresh SSL connections during the 9–5 window
-    pool_recycle = _env_int("DB_POOL_RECYCLE", 180)  # seconds
+    # Recycle every 60 s — well before Supabase's ~5-minute idle-kill timeout.
+    # This proactively replaces stale connections so SSL drops never reach queries.
+    pool_recycle = _env_int("DB_POOL_RECYCLE", 60)  # seconds
 
     connect_args = {
         "sslmode": "require",
-        "connect_timeout": 10,
+        "connect_timeout": 15,
         "options": "-c statement_timeout=30000",
         "keepalives": 1,
         "keepalives_idle": 30,
@@ -145,6 +149,23 @@ if DATABASE_URL.startswith("postgresql"):
 else:
     engine = _sqlite_engine(DATABASE_URL)
 
+# Rate-limited pool disposal: prevents concurrent retries from disposing each
+# other's freshly-opened connections (thundering-herd dispose storm).
+_dispose_lock = threading.Lock()
+_last_dispose_time: list[float] = [0.0]
+
+
+def _safe_dispose() -> None:
+    """Dispose the engine pool at most once every 2 s across all threads."""
+    now = time.monotonic()
+    with _dispose_lock:
+        if now - _last_dispose_time[0] >= 2.0:
+            try:
+                engine.dispose()
+            except Exception:
+                pass
+            _last_dispose_time[0] = time.monotonic()
+
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -197,10 +218,8 @@ class _RetryingQuery:
                     self._session.close()
                 except Exception:
                     pass
-                try:
-                    engine.dispose()
-                except Exception:
-                    pass
+                _safe_dispose()
+                time.sleep(0.5 * (attempt + 1))
         raise last_exc
 
     def _chain(self, method_name: str, *args, **kwargs) -> "_RetryingQuery":
@@ -278,6 +297,9 @@ class _RetryingQuery:
     def subquery(self, *a, **kw):
         return self._build_query().subquery(*a, **kw)
 
+    def scalar_subquery(self, *a, **kw):
+        return self._build_query().scalar_subquery(*a, **kw)
+
     def with_labels(self, *a, **kw):
         return self._chain("with_labels", *a, **kw)
 
@@ -351,10 +373,8 @@ class _RetryingSession:
                     self._session.close()
                 except Exception:
                     pass
-                try:
-                    engine.dispose()
-                except Exception:
-                    pass
+                _safe_dispose()
+                time.sleep(0.5 * (attempt + 1))
         if last_exc is not None:
             raise last_exc
 
