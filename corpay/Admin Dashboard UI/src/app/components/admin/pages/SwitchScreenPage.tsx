@@ -469,7 +469,7 @@ export function SwitchScreenPage() {
               <Button
                 onClick={() => {
                   // Open the frontend dashboard in Power BI mode in a new tab.
-                  window.open('http://localhost:5175/?frontend=powerbi', '_blank', 'noopener,noreferrer');
+                  window.open(`${import.meta.env.VITE_FRONTEND_URL || 'http://localhost:5175'}/?frontend=powerbi`, '_blank', 'noopener,noreferrer');
                 }}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
               >
