@@ -206,16 +206,16 @@ class _RetryingQuery:
                 if not _is_retryable(e) or attempt == _MAX_DB_RETRIES:
                     raise
                 last_exc = e
+                logger.warning(
+                    "DB transient error (attempt %d/%d): %s — retrying in %.1fs",
+                    attempt + 1, _MAX_DB_RETRIES + 1, e, 0.5 * (attempt + 1),
+                )
                 try:
                     self._session.rollback()
                 except Exception:
                     pass
                 try:
                     self._session.expire_all()
-                except Exception:
-                    pass
-                try:
-                    self._session.close()
                 except Exception:
                     pass
                 _safe_dispose()
@@ -361,16 +361,16 @@ class _RetryingSession:
                 if not _is_retryable(e) or attempt == _MAX_DB_RETRIES:
                     raise
                 last_exc = e
+                logger.warning(
+                    "DB transient error (attempt %d/%d): %s — retrying in %.1fs",
+                    attempt + 1, _MAX_DB_RETRIES + 1, e, 0.5 * (attempt + 1),
+                )
                 try:
                     self._session.rollback()
                 except Exception:
                     pass
                 try:
                     self._session.expire_all()
-                except Exception:
-                    pass
-                try:
-                    self._session.close()
                 except Exception:
                     pass
                 _safe_dispose()
