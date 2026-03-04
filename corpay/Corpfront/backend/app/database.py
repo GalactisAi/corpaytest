@@ -83,6 +83,7 @@ def _pg_engine(url: str):
         "keepalives": 1,
         "keepalives_idle": 30,
         "keepalives_interval": 5,
+        "tcp_user_timeout": 15000,
         "keepalives_count": 3,
         "application_name": "corpay_dashboard",
     }
