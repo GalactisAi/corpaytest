@@ -495,27 +495,23 @@ def _newsroom_agent_log(location: str, message: str, data: dict, hypothesis_id: 
 async def get_newsroom_items(limit: int = 12) -> List[NewsroomItemResponse]:
     """
     Get latest items from the public Corpay corporate newsroom.
-    
+
     Fetches with depth 20 from source (so Feb 11 etc. behind Featured items are included),
-    then returns up to `limit` (default 12). Cached briefly for verification.
+    then returns up to `limit` (default 12). Cached for 5 minutes to avoid hammering corpay.com.
     On scraper/request error, returns last known cached value if any; otherwise [].
     """
     cache_key = f"newsroom_{limit}"
     cached = get(cache_key)
-    # region agent log
-    if cached is not None:
-        _newsroom_agent_log("dashboard.py:get_newsroom_items", "Cache HIT", {"cache_key": cache_key, "cached_count": len(cached)}, "H4")
-    else:
-        _newsroom_agent_log("dashboard.py:get_newsroom_items", "Cache MISS, calling scraper", {"cache_key": cache_key}, "H4")
-    # endregion agent log
     if cached is not None:
         return cached
     try:
         items = await fetch_corpay_newsroom(limit=20)
         result = [NewsroomItemResponse(**item) for item in items[:limit]]
-        set(cache_key, result, ttl_seconds=10)
+        if result:
+            set(cache_key, result, ttl_seconds=300)
         return result
-    except Exception:
+    except Exception as exc:
+        logger.error("Newsroom endpoint error: %s", exc)
         last_cached = get(cache_key)
         if last_cached is not None:
             return last_cached

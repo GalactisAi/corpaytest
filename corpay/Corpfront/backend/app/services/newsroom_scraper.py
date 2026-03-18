@@ -173,26 +173,49 @@ def _debug_log(run_id: str, hypothesis_id: str, location: str, message: str, dat
   # endregion agent log
 
 
+_newsroom_logger = __import__("logging").getLogger("newsroom_scraper")
+
+_last_good_newsroom: List[Dict] = []
+
+
 async def fetch_corpay_newsroom(limit: int = 12) -> List[Dict]:
   """
   Fetch and parse the latest newsroom items from corpay.com.
   Uses official page structure: div.corporate-newsroom_article-container with
   span.corporate-newsroom_date, span.corporate-newsroom_tag, and article link.
   Returns items sorted by publish datetime (newest first).
+  Falls back to last successful result if the live fetch fails.
   """
+  global _last_good_newsroom
   from datetime import datetime as _dt
 
   items: List[Dict] = []
   seen_urls: set = set()
   try:
-    async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, read=10.0)) as client:
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(15.0, read=30.0),
+        follow_redirects=True,
+    ) as client:
       response = await client.get(CORPAY_NEWSROOM_URL, headers=CUSTOMER_STORIES_HEADERS)
+      _newsroom_logger.info(
+          "Newsroom fetch: status=%s size=%d",
+          response.status_code, len(response.text),
+      )
       response.raise_for_status()
+
+      if len(response.text) < 5000 or "corporate-newsroom" not in response.text:
+        _newsroom_logger.warning(
+            "Newsroom page looks like a challenge/block page (size=%d). "
+            "Falling back to last good result (%d items).",
+            len(response.text), len(_last_good_newsroom),
+        )
+        return _last_good_newsroom[:limit]
+
     soup = BeautifulSoup(response.text, "html.parser")
 
     article_containers = soup.find_all("div", class_=re.compile("corporate-newsroom_article-container"))
+    _newsroom_logger.info("Found %d article containers", len(article_containers))
     for container in article_containers:
-      # Robust date: prefer p.corporate-newsroom_date-time > span.corporate-newsroom_date, else span with class, else span containing "2026"
       date_span = None
       date_p = container.find("p", class_=re.compile("corporate-newsroom_date-time"))
       if date_p:
@@ -201,7 +224,8 @@ async def fetch_corpay_newsroom(limit: int = 12) -> List[Dict]:
         date_span = container.find("span", class_=re.compile("corporate-newsroom_date"))
       if not date_span:
         for span in container.find_all("span"):
-          if "2026" in (span.get_text() or ""):
+          txt = span.get_text() or ""
+          if re.search(r"20\d{2}", txt):
             date_span = span
             break
       tag_span = container.find("span", class_=re.compile("corporate-newsroom_tag"))
@@ -224,17 +248,12 @@ async def fetch_corpay_newsroom(limit: int = 12) -> List[Dict]:
 
       parsed_datetime = None
       if date_text:
-        print(f"DEBUG: Found Raw Date: '{date_text}'")
-        try:
-          parsed_datetime = _dt.strptime(date_text, "%B %d, %Y at %I:%M %p")
-        except Exception:
+        for fmt in ("%B %d, %Y at %I:%M %p", "%B %d, %Y", "%b %d, %Y"):
           try:
-            parsed_datetime = _dt.strptime(date_text, "%B %d, %Y")
-          except Exception:
-            try:
-              parsed_datetime = _dt.strptime(date_text, "%b %d, %Y")
-            except Exception:
-              parsed_datetime = None
+            parsed_datetime = _dt.strptime(date_text, fmt)
+            break
+          except ValueError:
+            continue
 
       items.append({
         "title": title,
@@ -245,11 +264,18 @@ async def fetch_corpay_newsroom(limit: int = 12) -> List[Dict]:
         "excerpt": "",
       })
 
-  except Exception:
+  except Exception as exc:
+    _newsroom_logger.error("Newsroom scraper failed: %s", exc, exc_info=True)
+    if _last_good_newsroom:
+      _newsroom_logger.info("Returning last good newsroom result (%d items)", len(_last_good_newsroom))
+      return _last_good_newsroom[:limit]
     return []
 
   items = sorted(items, key=lambda x: x.get("datetime") or _dt.min, reverse=True)
-  return items[:limit]
+  result = items[:limit]
+  if result:
+    _last_good_newsroom = result
+  return result
 
 
 async def fetch_corpay_resources_newsroom(limit: int = 4) -> List[Dict]:
