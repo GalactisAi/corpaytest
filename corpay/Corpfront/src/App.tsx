@@ -457,16 +457,16 @@ export default function App() {
     fetchData();
     fetchCardTitles();
 
-    // Refresh card titles every 10s
-    const cardTitlesInterval = setInterval(fetchCardTitles, 10000);
+    // Refresh card titles every 60s
+    const cardTitlesInterval = setInterval(fetchCardTitles, 60000);
     
-    // Refresh data every 15 seconds
-    const interval = setInterval(fetchData, 15000);
+    // Refresh data every 5 minutes
+    const interval = setInterval(fetchData, 5 * 60 * 1000);
     
-    // Refresh revenue data every 5 seconds
+    // Refresh revenue data every 30 seconds
     const revenueInterval = setInterval(() => {
       fetchRevenueData();
-    }, 5000);
+    }, 30000);
     
     // Function to fetch share price data
     const fetchSharePriceData = async () => {
@@ -517,10 +517,10 @@ export default function App() {
     // Immediately fetch share price data on mount
     fetchSharePriceData();
     
-    // Refresh share price data every 5 seconds
+    // Refresh share price data every 30 seconds
     const sharePriceInterval = setInterval(() => {
       fetchSharePriceData();
-    }, 5000);
+    }, 30000);
 
     // Function to fetch payments data
     const fetchPaymentsData = async () => {
@@ -562,14 +562,14 @@ export default function App() {
     fetchPaymentsData();
     fetchSystemPerformanceData();
 
-    // Refresh payments and system performance data every 5 seconds
+    // Refresh payments and system performance data every 30 seconds
     const paymentsInterval = setInterval(() => {
       fetchPaymentsData();
-    }, 5000);
+    }, 30000);
 
     const systemPerformanceInterval = setInterval(() => {
       fetchSystemPerformanceData();
-    }, 5000);
+    }, 30000);
     
     // Listen for manual refresh event
     const handleRefreshSharePrice = () => {
@@ -705,10 +705,10 @@ export default function App() {
       }
     };
     
-    // Refresh proportions every 5 seconds
+    // Refresh proportions every 30 seconds
     const proportionsInterval = setInterval(() => {
       fetchRevenueProportionsData();
-    }, 5000);
+    }, 30000);
     
     // Function to fetch employee milestones data
     const fetchEmployeesData = async () => {
@@ -759,11 +759,11 @@ export default function App() {
       }
     };
     
-    // Fetch employee milestones immediately and then every 5 seconds
+    // Fetch employee milestones immediately and then every 30 seconds
     fetchEmployeesData();
     const employeesInterval = setInterval(() => {
       fetchEmployeesData();
-    }, 5000);
+    }, 30000);
     
     window.addEventListener('storage', handleStorageChange);
     window.addEventListener('revenueDataUpdated', handleRevenueUpdate as EventListener);

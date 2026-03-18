@@ -10,13 +10,12 @@ function normalizeBase(raw?: string | null): string | null {
 }
 
 function productionFallbackBase(isBrowser: boolean): string | null {
+  // If no VITE_API_URL is set and we are on the Vercel admin domain, point to the Railway backend.
   if (isBrowser && typeof window !== 'undefined') {
     const host = window.location.hostname;
+    // Exact host match to avoid subdomain spoofing (e.g., finaltryadmin.vercel.app.evil.com)
     if (host === 'finaltryadmin.vercel.app' || host === 'www.finaltryadmin.vercel.app') {
       return 'https://finaltry-production-0eb2.up.railway.app';
-    }
-    if (host === 'corpaytest-admin.vercel.app' || host === 'www.corpaytest-admin.vercel.app') {
-      return 'https://corpaytest-backend-production.up.railway.app';
     }
   }
   return null;
