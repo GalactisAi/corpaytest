@@ -82,6 +82,13 @@ async def lifespan(app: FastAPI):
     # Initialize default admin user
     init_default_admin()
 
+    # Ensure Supabase Storage bucket exists (auto-create if missing)
+    try:
+        from app.utils.file_handler import ensure_supabase_bucket
+        ensure_supabase_bucket()
+    except Exception as e:
+        print(f"WARNING: Supabase bucket check failed at startup: {e}")
+
     # Clear newsroom cache so first request after restart gets fresh data (with dates)
     try:
         from app.utils.cache import delete

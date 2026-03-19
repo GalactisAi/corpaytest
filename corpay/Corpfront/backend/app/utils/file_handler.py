@@ -16,6 +16,45 @@ def ensure_upload_dir():
     return upload_path
 
 
+def ensure_supabase_bucket(bucket: Optional[str] = None) -> bool:
+    """Ensure the Supabase Storage bucket exists; create it (public) if missing.
+    Returns True if the bucket is confirmed to exist, False on error."""
+    base = (settings.supabase_url or "").strip().rstrip("/")
+    key = (settings.supabase_service_key or "").strip()
+    if not base or not key:
+        return False
+    bucket = (bucket or settings.supabase_uploads_bucket or "uploads").strip() or "uploads"
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(f"{base}/storage/v1/bucket/{bucket}", headers=headers)
+            if resp.status_code == 200:
+                print(f"[Supabase Storage] Bucket '{bucket}' exists")
+                return True
+            if resp.status_code in (404, 400):
+                print(f"[Supabase Storage] Bucket '{bucket}' not found, creating...")
+                create_resp = client.post(
+                    f"{base}/storage/v1/bucket",
+                    headers=headers,
+                    json={"id": bucket, "name": bucket, "public": True},
+                )
+                if create_resp.status_code in (200, 201):
+                    print(f"[Supabase Storage] Bucket '{bucket}' created successfully")
+                    return True
+                print(f"[Supabase Storage] Failed to create bucket '{bucket}': "
+                      f"{create_resp.status_code} - {create_resp.text}")
+                return False
+            print(f"[Supabase Storage] Unexpected status checking bucket '{bucket}': "
+                  f"{resp.status_code} - {resp.text}")
+            return False
+    except Exception as e:
+        print(f"[Supabase Storage] Error checking/creating bucket '{bucket}': {e}")
+        return False
+
+
 def _upload_to_supabase_bytes(
     content: bytes, filename: str, content_type: Optional[str], subdirectory: str
 ) -> Tuple[str, str]:
@@ -35,10 +74,24 @@ def _upload_to_supabase_bytes(
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": content_type or "application/octet-stream",
+        "x-upsert": "true",
     }
     with httpx.Client(timeout=60.0) as client:
         resp = client.post(upload_url, content=content, headers=headers)
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            error_body = resp.text
+            print(f"[Supabase Storage] Upload failed for '{object_path}': "
+                  f"{resp.status_code} - {error_body}")
+            if resp.status_code == 400 and ("not found" in error_body.lower()
+                                            or "bucket" in error_body.lower()):
+                print("[Supabase Storage] Bucket may not exist, attempting to create...")
+                if ensure_supabase_bucket(bucket):
+                    retry = client.post(upload_url, content=content, headers=headers)
+                    if retry.status_code < 400:
+                        return object_path, public_url
+                    print(f"[Supabase Storage] Retry after bucket creation also failed: "
+                          f"{retry.status_code} - {retry.text}")
+            resp.raise_for_status()
     return object_path, public_url
 
 
