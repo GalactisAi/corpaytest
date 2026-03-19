@@ -168,9 +168,8 @@ def _build_cors_origins() -> tuple[list[str], str | None]:
     if _env_bool("CORS_ALLOW_ALL", default=False):
         return [], ".*"
 
-    # Allow any *.up.railway.app origin by default to cover preview/prod domains
-    # Include both http and https to support preview links accessed without TLS during development.
-    allow_regex = os.getenv("CORS_ALLOW_ORIGIN_REGEX") or r"https?://.*\.up\.railway\.app"
+    # Allow any *.up.railway.app and *.vercel.app origin by default to cover preview/prod domains
+    allow_regex = os.getenv("CORS_ALLOW_ORIGIN_REGEX") or r"https?://(.*\.up\.railway\.app|.*\.vercel\.app)"
     return list(origins), allow_regex
 
 
